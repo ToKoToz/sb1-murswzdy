@@ -16,7 +16,9 @@ import {
   Mail,
   Phone,
   Briefcase,
-  Camera
+  Camera,
+  UserCheck,
+  Award
 } from 'lucide-react';
 
 function TrainerManagement() {
@@ -234,7 +236,6 @@ function TrainerManagement() {
             await deleteProfilePicture(trainer.profile_picture_url);
           }
 
-          // Delete the profile directly (simplified for demo)
           const { error } = await supabase
             .from('profiles')
             .delete()
@@ -334,10 +335,10 @@ function TrainerManagement() {
           />
           <div>
             <h1 className="text-3xl font-bold text-primary-800 mb-2">
-              Gestion des Formateurs
+              Mes Formateurs
             </h1>
             <p className="text-primary-600">
-              Gérez les profils et informations des formateurs
+              Gérez votre équipe de formateurs
             </p>
           </div>
         </div>
@@ -470,7 +471,7 @@ function TrainerManagement() {
 
               <div>
                 <label className="block text-primary-700 text-sm font-medium mb-2">
-                  Numéro de téléphone *
+                  Numéro de téléphone
                 </label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
@@ -478,7 +479,6 @@ function TrainerManagement() {
                     type="tel"
                     value={formData.phone_number}
                     onChange={(e) => setFormData(prev => ({ ...prev, phone_number: e.target.value }))}
-                    required
                     className="w-full pl-11 pr-4 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 placeholder-primary-400 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
                     placeholder="06 12 34 56 78"
                   />
@@ -487,14 +487,13 @@ function TrainerManagement() {
 
               <div>
                 <label className="block text-primary-700 text-sm font-medium mb-2">
-                  Fonction/Titre *
+                  Fonction/Titre
                 </label>
                 <div className="relative">
                   <Briefcase className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
                   <select
                     value={formData.function_title}
                     onChange={(e) => setFormData(prev => ({ ...prev, function_title: e.target.value }))}
-                    required
                     className="w-full pl-11 pr-8 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
                   >
                     <option value="">Sélectionner une fonction</option>
@@ -560,8 +559,9 @@ function TrainerManagement() {
       {/* Trainers List */}
       <div className="bg-white backdrop-blur-sm rounded-xl border border-primary-200 overflow-hidden shadow-lg">
         <div className="p-6 border-b border-primary-200">
-          <h2 className="text-xl font-semibold text-primary-800">
-            Formateurs ({filteredTrainers.length})
+          <h2 className="text-xl font-semibold text-primary-800 flex items-center space-x-2">
+            <UserCheck className="w-6 h-6" />
+            <span>Formateurs ({filteredTrainers.length})</span>
           </h2>
         </div>
 
@@ -596,6 +596,11 @@ function TrainerManagement() {
                         </span>
                       )}
                     </div>
+                    {trainer.experience && (
+                      <p className="text-primary-500 text-sm mt-1 line-clamp-2">
+                        {trainer.experience}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -622,7 +627,7 @@ function TrainerManagement() {
 
         {filteredTrainers.length === 0 && (
           <div className="p-12 text-center">
-            <User className="w-12 h-12 text-primary-400 mx-auto mb-4" />
+            <UserCheck className="w-12 h-12 text-primary-400 mx-auto mb-4" />
             <h3 className="text-primary-700 font-medium mb-2">
               {searchTerm ? 'Aucun formateur trouvé' : 'Aucun formateur'}
             </h3>

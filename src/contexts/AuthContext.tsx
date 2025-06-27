@@ -66,14 +66,35 @@ const initialState: AuthState = {
   error: null
 };
 
+let authInitialized = false;
+let authTimeout: NodeJS.Timeout | null = null;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
   useEffect(() => {
+    // Éviter les initialisations multiples
+    if (authInitialized) {
+      return;
+    }
+    
+    authInitialized = true;
+    
+    // Timeout de sécurité pour éviter le chargement infini
+    authTimeout = setTimeout(() => {
+      console.warn('⚠️ Auth timeout - forcing no user state');
+      dispatch({ type: 'SET_USER', payload: null });
+    }, 10000); // 10 secondes max
+
     initializeAuth();
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔥 Auth state change:', event, session?.user?.email);
+      
+      if (authTimeout) {
+        clearTimeout(authTimeout);
+        authTimeout = null;
+      }
       
       if (event === 'SIGNED_IN' && session?.user) {
         console.log('✅ User signed in, loading profile...');
@@ -84,8 +105,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      subscription.unsubscribe();
+      if (authTimeout) {
+        clearTimeout(authTimeout);
+      }
+    };
+  }, []); // Dépendances vides pour éviter les re-runs
 
   const initializeAuth = async () => {
     try {
@@ -118,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log('📊 Loading user profile for:', authUser.id, authUser.email);
       
-      // Load profile from the profiles table (simple query, no joins)
+      // Requête simple sans joins complexes
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -129,73 +155,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (profileError) {
         console.error('❌ Profile error:', profileError);
-        throw profileError;
+        // Ne pas throw, créer un fallback user
       }
 
-      // If no profile exists, create one automatically
-      if (!profile) {
-        console.log('🆕 No profile found, creating basic profile...');
+      let user: User;
+
+      if (profile) {
+        // Profil existant trouvé
+        user = {
+          id: profile.id,
+          email: profile.email,
+          name: profile.name,
+          role: profile.role,
+          phone: profile.phone_number,
+          function_title: profile.function_title,
+          created_at: profile.created_at,
+          updated_at: profile.updated_at
+        };
+      } else {
+        // Profil manquant - créer un utilisateur basique
+        console.log('🆕 No profile found, creating fallback user...');
         
-        const newProfile = {
+        user = {
           id: authUser.id,
-          name: authUser.user_metadata?.name || authUser.email.split('@')[0],
           email: authUser.email,
+          name: authUser.user_metadata?.name || authUser.email.split('@')[0],
           role: authUser.user_metadata?.role || 'trainer',
+          created_at: authUser.created_at,
+          updated_at: authUser.updated_at || authUser.created_at
         };
 
-        console.log('💾 Creating new profile:', newProfile);
-
-        const { data: createdProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert(newProfile)
-          .select()
-          .single();
-
-        if (createError) {
-          console.error('❌ Error creating profile:', createError);
-          // Fall back to basic user object
-          const fallbackUser: User = {
-            id: authUser.id,
-            email: authUser.email,
-            name: authUser.user_metadata?.name || authUser.email.split('@')[0],
-            role: authUser.user_metadata?.role || 'trainer',
-            created_at: authUser.created_at,
-            updated_at: authUser.updated_at || authUser.created_at
-          };
-          
-          console.log('🔄 Using fallback user:', fallbackUser);
-          dispatch({ type: 'SET_USER', payload: fallbackUser });
-          return;
-        }
-
-        console.log('✅ Profile created successfully');
-        const user: User = {
-          id: createdProfile.id,
-          email: createdProfile.email,
-          name: createdProfile.name,
-          role: createdProfile.role,
-          phone: createdProfile.phone_number,
-          function_title: createdProfile.function_title,
-          created_at: createdProfile.created_at,
-          updated_at: createdProfile.updated_at
-        };
-
-        console.log('👍 Setting new user:', user);
-        dispatch({ type: 'SET_USER', payload: user });
-        return;
+        // Essayer de créer le profil en arrière-plan (sans bloquer)
+        setTimeout(async () => {
+          try {
+            await supabase
+              .from('profiles')
+              .upsert({
+                id: authUser.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+              });
+            console.log('✅ Profile created in background');
+          } catch (error) {
+            console.log('⚠️ Could not create profile:', error);
+          }
+        }, 1000);
       }
-
-      // Build user object from existing profile
-      const user: User = {
-        id: profile.id,
-        email: profile.email,
-        name: profile.name,
-        role: profile.role,
-        phone: profile.phone_number,
-        function_title: profile.function_title,
-        created_at: profile.created_at,
-        updated_at: profile.updated_at
-      };
 
       console.log('✅ User profile loaded successfully:', user);
       dispatch({ type: 'SET_USER', payload: user });
@@ -203,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('💥 Error loading user profile:', error);
       
-      // Create a fallback user to prevent infinite loading
+      // Créer un utilisateur de fallback pour éviter les boucles
       const fallbackUser: User = {
         id: authUser.id,
         email: authUser.email,
@@ -276,7 +282,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       'Password should be at least 6 characters': 'Le mot de passe doit contenir au moins 6 caractères',
       'Invalid email': 'Format d\'email invalide',
       'User not found': 'Utilisateur non trouvé',
-      'Email rate limit exceeded': 'Trop de tentatives, veuillez réessayer plus tard'
+      'Email rate limit exceeded': 'Trop de tentatives, veuillez réessayer plus tard',
+      'Database error querying schema': 'Erreur de base de données - Veuillez réessayer'
     };
 
     return errorMap[error] || 'Une erreur est survenue';

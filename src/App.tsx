@@ -9,6 +9,7 @@ import UserManagement from './pages/UserManagement';
 import TrainingList from './pages/TrainingList';
 import TrainingDetail from './pages/TrainingDetail';
 import CreateTraining from './pages/CreateTraining';
+import TrainerManagement from './pages/TrainerManagement';
 import ClientManagement from './pages/ClientManagement';
 import SignaturePage from './pages/SignaturePage';
 import Layout from './components/Layout';
@@ -37,20 +38,28 @@ function AppContent() {
             Erreur d'authentification
           </h2>
           <p className="text-primary-600 mb-6">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-accent hover:bg-accent-dark text-white px-6 py-2 rounded-lg transition-colors duration-200"
-          >
-            Réessayer
-          </button>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 bg-accent hover:bg-accent-dark text-white px-6 py-2 rounded-lg transition-colors duration-200"
+            >
+              Réessayer
+            </button>
+            <button
+              onClick={() => window.location.href = '/login'}
+              className="flex-1 bg-primary-500 hover:bg-primary-600 text-white px-6 py-2 rounded-lg transition-colors duration-200"
+            >
+              Connexion
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Show loading spinner while checking authentication
+  // Show loading spinner with timeout protection
   if (isLoading) {
-    return <LoadingSpinner message="Chargement de l'application..." />;
+    return <LoadingSpinner message="Vérification de l'authentification..." />;
   }
 
   // If not authenticated, show login or public pages
@@ -109,6 +118,7 @@ function AppContent() {
                 <Route path="/trainings" element={<TrainingList />} />
                 <Route path="/trainings/new" element={<CreateTraining />} />
                 <Route path="/trainings/:id" element={<TrainingDetail />} />
+                <Route path="/trainers" element={<TrainerManagement />} />
                 <Route path="/clients" element={<ClientManagement />} />
                 
                 {/* Fallback */}
