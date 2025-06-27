@@ -4,32 +4,24 @@ import { supabase } from '../lib/supabase';
 interface User {
   id: string;
   email: string;
-  firstName: string;
-  lastName: string;
-  role: { name: string; displayName: string } | null;
-  status: string;
-  permissions: string[];
-  profilePicture?: string;
+  name: string;
+  role: string;
   phone?: string;
-  department?: string;
-  jobTitle?: string;
-  bio?: string;
-  createdAt: string;
-  updatedAt: string;
+  function_title?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface AuthState {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  permissions: string[];
   error: string | null;
 }
 
 interface AuthContextType extends AuthState {
   login: (credentials: { email: string; password: string; rememberMe?: boolean }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  hasPermission: (permission: string) => boolean;
   hasRole: (role: string) => boolean;
 }
 
@@ -60,7 +52,6 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         user: null,
         isLoading: false,
         isAuthenticated: false,
-        permissions: [],
         error: null
       };
     default:
@@ -72,7 +63,6 @@ const initialState: AuthState = {
   user: null,
   isLoading: true,
   isAuthenticated: false,
-  permissions: [],
   error: null
 };
 
@@ -83,9 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeAuth();
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('🔥 Auth state change:', event, session?.user?.email);
+      
       if (event === 'SIGNED_IN' && session?.user) {
+        console.log('✅ User signed in, loading profile...');
         await loadUserProfile(session.user);
       } else if (event === 'SIGNED_OUT') {
+        console.log('🚪 User signed out');
         dispatch({ type: 'LOGOUT' });
       }
     });
@@ -95,138 +89,138 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const initializeAuth = async () => {
     try {
+      console.log('🚀 Initializing auth...');
       dispatch({ type: 'SET_LOADING', payload: true });
       
       const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('📋 Session check:', session?.user?.email, error);
       
       if (error) {
-        console.error('Session error:', error);
+        console.error('❌ Session error:', error);
         dispatch({ type: 'SET_ERROR', payload: 'Erreur de session' });
         return;
       }
       
       if (session?.user) {
+        console.log('👤 Session found, loading user profile...');
         await loadUserProfile(session.user);
       } else {
+        console.log('🚫 No session found');
         dispatch({ type: 'SET_USER', payload: null });
       }
     } catch (error) {
-      console.error('Auth initialization error:', error);
+      console.error('💥 Auth initialization error:', error);
       dispatch({ type: 'SET_ERROR', payload: 'Erreur d\'initialisation' });
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
   const loadUserProfile = async (authUser: any) => {
     try {
-      // Try to get user profile from user_profiles table
-      let { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select(`
-          *,
-          role:user_roles(name, display_name)
-        `)
+      console.log('📊 Loading user profile for:', authUser.id, authUser.email);
+      
+      // Load profile from the profiles table (simple query, no joins)
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
         .eq('id', authUser.id)
         .maybeSingle();
 
-      // If no profile exists, try to create one
-      if (!profile && !profileError) {
-        // First check if we have the necessary tables
-        const { data: rolesData } = await supabase
-          .from('user_roles')
-          .select('id, name')
-          .eq('name', 'trainer')
-          .maybeSingle();
+      console.log('👤 Profile query result:', profile, profileError);
 
-        if (rolesData) {
-          // Create profile for existing auth user
-          const { data: newProfile, error: createError } = await supabase
-            .from('user_profiles')
-            .insert({
-              id: authUser.id,
-              email: authUser.email,
-              first_name: authUser.user_metadata?.first_name || authUser.email.split('@')[0],
-              last_name: authUser.user_metadata?.last_name || 'User',
-              role_id: rolesData.id,
-              status: 'active',
-              email_verified_at: authUser.email_confirmed_at
-            })
-            .select(`
-              *,
-              role:user_roles(name, display_name)
-            `)
-            .single();
-
-          if (!createError) {
-            profile = newProfile;
-          }
-        }
+      if (profileError) {
+        console.error('❌ Profile error:', profileError);
+        throw profileError;
       }
 
-      // If we still don't have a profile, create a basic user object
+      // If no profile exists, create one automatically
       if (!profile) {
-        const basicUser: User = {
+        console.log('🆕 No profile found, creating basic profile...');
+        
+        const newProfile = {
           id: authUser.id,
+          name: authUser.user_metadata?.name || authUser.email.split('@')[0],
           email: authUser.email,
-          firstName: authUser.user_metadata?.first_name || authUser.email.split('@')[0],
-          lastName: authUser.user_metadata?.last_name || 'User',
-          role: { name: 'trainer', displayName: 'Formateur' },
-          status: 'active',
-          permissions: [],
-          createdAt: authUser.created_at,
-          updatedAt: authUser.updated_at || authUser.created_at
+          role: authUser.user_metadata?.role || 'trainer',
         };
 
-        dispatch({ type: 'SET_USER', payload: basicUser });
+        console.log('💾 Creating new profile:', newProfile);
+
+        const { data: createdProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert(newProfile)
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('❌ Error creating profile:', createError);
+          // Fall back to basic user object
+          const fallbackUser: User = {
+            id: authUser.id,
+            email: authUser.email,
+            name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+            role: authUser.user_metadata?.role || 'trainer',
+            created_at: authUser.created_at,
+            updated_at: authUser.updated_at || authUser.created_at
+          };
+          
+          console.log('🔄 Using fallback user:', fallbackUser);
+          dispatch({ type: 'SET_USER', payload: fallbackUser });
+          return;
+        }
+
+        console.log('✅ Profile created successfully');
+        const user: User = {
+          id: createdProfile.id,
+          email: createdProfile.email,
+          name: createdProfile.name,
+          role: createdProfile.role,
+          phone: createdProfile.phone_number,
+          function_title: createdProfile.function_title,
+          created_at: createdProfile.created_at,
+          updated_at: createdProfile.updated_at
+        };
+
+        console.log('👍 Setting new user:', user);
+        dispatch({ type: 'SET_USER', payload: user });
         return;
       }
 
-      // Build user object from profile
+      // Build user object from existing profile
       const user: User = {
         id: profile.id,
         email: profile.email,
-        firstName: profile.first_name,
-        lastName: profile.last_name,
-        role: profile.role ? {
-          name: profile.role.name,
-          displayName: profile.role.display_name
-        } : { name: 'trainer', displayName: 'Formateur' },
-        status: profile.status,
-        permissions: [],
-        profilePicture: profile.profile_picture,
-        phone: profile.phone,
-        department: profile.department,
-        jobTitle: profile.job_title,
-        bio: profile.bio,
-        createdAt: profile.created_at,
-        updatedAt: profile.updated_at
+        name: profile.name,
+        role: profile.role,
+        phone: profile.phone_number,
+        function_title: profile.function_title,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at
       };
 
+      console.log('✅ User profile loaded successfully:', user);
       dispatch({ type: 'SET_USER', payload: user });
 
     } catch (error) {
-      console.error('Error loading user profile:', error);
+      console.error('💥 Error loading user profile:', error);
       
-      // Create a fallback user if there's an error
+      // Create a fallback user to prevent infinite loading
       const fallbackUser: User = {
         id: authUser.id,
         email: authUser.email,
-        firstName: authUser.user_metadata?.first_name || authUser.email.split('@')[0],
-        lastName: authUser.user_metadata?.last_name || 'User',
-        role: { name: 'trainer', displayName: 'Formateur' },
-        status: 'active',
-        permissions: [],
-        createdAt: authUser.created_at,
-        updatedAt: authUser.updated_at || authUser.created_at
+        name: authUser.user_metadata?.name || authUser.email.split('@')[0],
+        role: authUser.user_metadata?.role || 'trainer',
+        created_at: authUser.created_at,
+        updated_at: authUser.updated_at || authUser.created_at
       };
 
+      console.log('🔄 Using fallback user:', fallbackUser);
       dispatch({ type: 'SET_USER', payload: fallbackUser });
     }
   };
 
   const login = async (credentials: { email: string; password: string; rememberMe?: boolean }) => {
     try {
+      console.log('🔐 Attempting login for:', credentials.email);
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
 
@@ -236,19 +230,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (error) {
+        console.error('❌ Login error:', error);
         const errorMessage = getAuthErrorMessage(error.message);
         dispatch({ type: 'SET_ERROR', payload: errorMessage });
         return { success: false, error: errorMessage };
       }
 
       if (data.user) {
+        console.log('✅ Login successful for:', data.user.email);
         await loadUserProfile(data.user);
         return { success: true };
       }
 
       return { success: false, error: 'Erreur de connexion' };
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('💥 Login error:', error);
       const errorMessage = 'Erreur de connexion';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       return { success: false, error: errorMessage };
@@ -259,20 +255,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
+      console.log('🚪 Logging out...');
       await supabase.auth.signOut();
       dispatch({ type: 'LOGOUT' });
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('❌ Logout error:', error);
       dispatch({ type: 'LOGOUT' });
     }
   };
 
-  const hasPermission = (permission: string): boolean => {
-    return state.permissions.includes(permission) || state.user?.role?.name === 'admin';
-  };
-
   const hasRole = (role: string): boolean => {
-    return state.user?.role?.name === role;
+    return state.user?.role === role;
   };
 
   const getAuthErrorMessage = (error: string): string => {
@@ -294,7 +287,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...state,
       login,
       logout,
-      hasPermission,
       hasRole
     }}>
       {children}

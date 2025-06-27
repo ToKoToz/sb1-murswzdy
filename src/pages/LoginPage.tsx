@@ -49,7 +49,7 @@ function LoginPage() {
     {
       icon: Shield,
       title: 'Sécurité Avancée',
-      description: 'Authentification à deux facteurs et chiffrement des données'
+      description: 'Authentification sécurisée et protection des données'
     },
     {
       icon: Users,
@@ -103,7 +103,7 @@ function LoginPage() {
             <div className="mt-12 p-6 bg-white bg-opacity-10 rounded-2xl backdrop-blur-sm">
               <div className="flex items-center space-x-3 mb-3">
                 <CheckCircle className="w-5 h-5" />
-                <span className="font-semibold">Déjà 500+ utilisateurs actifs</span>
+                <span className="font-semibold">Plateforme sécurisée et fiable</span>
               </div>
               <p className="text-sm text-accent-light">
                 Rejoignez les entreprises qui font confiance à Formation Pro
@@ -232,7 +232,7 @@ function LoginPage() {
               {/* Demo Credentials */}
               <div className="mt-8 p-4 bg-gradient-to-r from-primary-50 to-accent-50 rounded-xl border border-primary-200">
                 <h4 className="text-primary-800 font-semibold mb-3 text-center">
-                  🚀 Accès démo
+                  🚀 Comptes de démonstration
                 </h4>
                 <div className="space-y-2 text-xs">
                   <div className="bg-white p-3 rounded-lg">
