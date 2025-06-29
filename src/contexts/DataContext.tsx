@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase, Training, Participant, Client } from '../lib/supabase';
+import { supabase, Training, Participant, Client, testSupabaseConnection } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
 // Profile interface matching the database structure
@@ -26,6 +26,7 @@ interface DataContextType {
   loading: boolean;
   error: string | null;
   currentUser: any;
+  connectionStatus: 'testing' | 'connected' | 'failed' | 'idle';
   addTraining: (training: Omit<Training, 'id' | 'created_at' | 'updated_at'>) => Promise<Training | null>;
   updateTraining: (id: string, updates: Partial<Training>) => Promise<boolean>;
   updateParticipant: (trainingId: string, participantId: string, updates: Partial<Participant>) => Promise<boolean>;
@@ -35,6 +36,7 @@ interface DataContextType {
   refreshTrainings: () => Promise<void>;
   refreshClients: () => Promise<void>;
   refreshTrainers: () => Promise<void>;
+  retryConnection: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -45,14 +47,36 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'testing' | 'connected' | 'failed' | 'idle'>('idle');
   
   const { user, isAuthenticated } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchData();
+      initializeData();
     }
   }, [isAuthenticated]);
+
+  const initializeData = async () => {
+    if (!isAuthenticated) return;
+    
+    console.log('🚀 DataContext: Initializing data...');
+    setConnectionStatus('testing');
+    setError(null);
+    
+    // First test Supabase connectivity
+    const connectionTest = await testSupabaseConnection();
+    
+    if (!connectionTest.success) {
+      console.error('❌ DataContext: Supabase connection failed:', connectionTest.error);
+      setConnectionStatus('failed');
+      setError(`Erreur de connexion à la base de données: ${connectionTest.error}`);
+      return;
+    }
+    
+    setConnectionStatus('connected');
+    await fetchData();
+  };
 
   const fetchData = async () => {
     if (!isAuthenticated) return;
@@ -71,6 +95,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ DataContext: Error fetching data:', error);
       setError('Erreur de chargement des données');
+      
+      // If this is a network error, update connection status
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
+        setConnectionStatus('failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -84,14 +113,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (trainingsError) throw trainingsError;
+      if (trainingsError) {
+        console.error('❌ Trainings query error:', trainingsError);
+        throw new Error(`Erreur lors du chargement des formations: ${trainingsError.message}`);
+      }
 
       console.log('📋 Fetching participants...');
       const { data: participantsData, error: participantsError } = await supabase
         .from('participants')
         .select('*');
 
-      if (participantsError) throw participantsError;
+      if (participantsError) {
+        console.error('❌ Participants query error:', participantsError);
+        throw new Error(`Erreur lors du chargement des participants: ${participantsError.message}`);
+      }
 
       const trainingsWithParticipants = (trainingsData || []).map(training => ({
         ...training,
@@ -103,6 +138,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Error fetching trainings:', error);
       setTrainings([]);
+      throw error;
     }
   };
 
@@ -115,13 +151,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .eq('role', 'trainer')
         .order('name');
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Trainers query error:', error);
+        throw new Error(`Erreur lors du chargement des formateurs: ${error.message}`);
+      }
       
       console.log('✅ Trainers loaded:', data?.length || 0);
       setTrainers(data || []);
     } catch (error) {
       console.error('❌ Error fetching trainers:', error);
       setTrainers([]);
+      throw error;
     }
   };
 
@@ -133,7 +173,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .select('*')
         .order('name');
 
-      if (clientsError) throw clientsError;
+      if (clientsError) {
+        console.error('❌ Clients query error:', clientsError);
+        throw new Error(`Erreur lors du chargement des clients: ${clientsError.message}`);
+      }
 
       console.log('👥 Fetching employees...');
       const { data: employeesData, error: employeesError } = await supabase
@@ -141,7 +184,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .select('*')
         .order('last_name');
 
-      if (employeesError) throw employeesError;
+      if (employeesError) {
+        console.error('❌ Employees query error:', employeesError);
+        throw new Error(`Erreur lors du chargement des employés: ${employeesError.message}`);
+      }
 
       const clientsWithEmployees = (clientsData || []).map(client => ({
         ...client,
@@ -153,6 +199,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('❌ Error fetching clients:', error);
       setClients([]);
+      throw error;
     }
   };
 
@@ -165,14 +212,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Add training error:', error);
+        throw new Error(`Erreur lors de l'ajout de la formation: ${error.message}`);
+      }
 
-      await refreshTrainings();
       console.log('✅ Training added successfully');
+      
+      // Immediately update local training data to include the new training (initially without participants)
+      setTrainings(prev => [{ ...data, participants: [] }, ...prev]);
+      
       return data;
     } catch (error) {
       console.error('❌ Error adding training:', error);
-      setError('Erreur lors de l\'ajout de la formation');
+      setError(error instanceof Error ? error.message : 'Erreur lors de l\'ajout de la formation');
       return null;
     }
   };
@@ -185,14 +238,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .update(updates)
         .eq('id', id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Update training error:', error);
+        throw new Error(`Erreur lors de la mise à jour: ${error.message}`);
+      }
 
       await refreshTrainings();
       console.log('✅ Training updated successfully');
       return true;
     } catch (error) {
       console.error('❌ Error updating training:', error);
-      setError('Erreur lors de la mise à jour de la formation');
+      setError(error instanceof Error ? error.message : 'Erreur lors de la mise à jour de la formation');
       return false;
     }
   };
@@ -206,14 +262,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .eq('id', participantId)
         .eq('training_id', trainingId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Update participant error:', error);
+        throw new Error(`Erreur lors de la mise à jour du participant: ${error.message}`);
+      }
 
-      await refreshTrainings();
+      // Update local state immediately
+      setTrainings(prevTrainings => {
+        return prevTrainings.map(training => {
+          if (training.id === trainingId) {
+            return {
+              ...training,
+              participants: (training.participants || []).map(p => 
+                p.id === participantId ? { ...p, ...updates } : p
+              )
+            };
+          }
+          return training;
+        });
+      });
+      
       console.log('✅ Participant updated successfully');
       return true;
     } catch (error) {
       console.error('❌ Error updating participant:', error);
-      setError('Erreur lors de la mise à jour du participant');
+      setError(error instanceof Error ? error.message : 'Erreur lors de la mise à jour du participant');
       return false;
     }
   };
@@ -221,18 +294,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addParticipant = async (trainingId: string, participantData: Omit<Participant, 'id' | 'training_id' | 'created_at' | 'updated_at'>): Promise<boolean> => {
     try {
       console.log('➕ Adding participant to training:', trainingId);
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('participants')
-        .insert([{ ...participantData, training_id: trainingId }]);
+        .insert([{ ...participantData, training_id: trainingId }])
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Add participant error:', error);
+        throw new Error(`Erreur lors de l'ajout du participant: ${error.message}`);
+      }
 
-      await refreshTrainings();
+      // Update local state immediately
+      setTrainings(prevTrainings => {
+        return prevTrainings.map(training => {
+          if (training.id === trainingId) {
+            return {
+              ...training,
+              participants: [...(training.participants || []), ...data]
+            };
+          }
+          return training;
+        });
+      });
+
       console.log('✅ Participant added successfully');
       return true;
     } catch (error) {
       console.error('❌ Error adding participant:', error);
-      setError('Erreur lors de l\'ajout du participant');
+      setError(error instanceof Error ? error.message : 'Erreur lors de l\'ajout du participant');
       return false;
     }
   };
@@ -246,14 +335,29 @@ export function DataProvider({ children }: { children: ReactNode }) {
         .eq('id', participantId)
         .eq('training_id', trainingId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Remove participant error:', error);
+        throw new Error(`Erreur lors de la suppression du participant: ${error.message}`);
+      }
 
-      await refreshTrainings();
+      // Update local state immediately
+      setTrainings(prevTrainings => {
+        return prevTrainings.map(training => {
+          if (training.id === trainingId) {
+            return {
+              ...training,
+              participants: (training.participants || []).filter(p => p.id !== participantId)
+            };
+          }
+          return training;
+        });
+      });
+
       console.log('✅ Participant removed successfully');
       return true;
     } catch (error) {
       console.error('❌ Error removing participant:', error);
-      setError('Erreur lors de la suppression du participant');
+      setError(error instanceof Error ? error.message : 'Erreur lors de la suppression du participant');
       return false;
     }
   };
@@ -263,15 +367,32 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshTrainings = async () => {
+    if (connectionStatus === 'failed') {
+      await retryConnection();
+      return;
+    }
     await fetchTrainings();
   };
 
   const refreshClients = async () => {
+    if (connectionStatus === 'failed') {
+      await retryConnection();
+      return;
+    }
     await fetchClients();
   };
 
   const refreshTrainers = async () => {
+    if (connectionStatus === 'failed') {
+      await retryConnection();
+      return;
+    }
     await fetchTrainers();
+  };
+
+  const retryConnection = async () => {
+    console.log('🔄 Retrying Supabase connection...');
+    await initializeData();
   };
 
   return (
@@ -282,6 +403,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       currentUser: user,
+      connectionStatus,
       addTraining,
       updateTraining,
       updateParticipant,
@@ -290,7 +412,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       getTraining,
       refreshTrainings,
       refreshClients,
-      refreshTrainers
+      refreshTrainers,
+      retryConnection
     }}>
       {children}
     </DataContext.Provider>

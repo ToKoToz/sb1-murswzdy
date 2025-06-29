@@ -18,7 +18,11 @@ import {
   Briefcase,
   Camera,
   UserCheck,
-  Award
+  Award,
+  Lock,
+  Eye,
+  EyeOff,
+  Shield
 } from 'lucide-react';
 
 function TrainerManagement() {
@@ -28,9 +32,11 @@ function TrainerManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTrainer, setEditingTrainer] = useState<Profile | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
+    password: '',
     phone_number: '',
     function_title: '',
     specialties: [] as string[],
@@ -68,6 +74,9 @@ function TrainerManagement() {
     type: 'info',
     message: ''
   });
+
+  // Check if current user is admin
+  const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
     fetchTrainers();
@@ -147,13 +156,38 @@ function TrainerManagement() {
     }
   };
 
+  const validatePassword = (password: string): string | null => {
+    if (password.length < 8) {
+      return 'Le mot de passe doit contenir au moins 8 caractères';
+    }
+    if (!/(?=.*[a-z])/.test(password)) {
+      return 'Le mot de passe doit contenir au moins une lettre minuscule';
+    }
+    if (!/(?=.*[A-Z])/.test(password)) {
+      return 'Le mot de passe doit contenir au moins une lettre majuscule';
+    }
+    if (!/(?=.*\d)/.test(password)) {
+      return 'Le mot de passe doit contenir au moins un chiffre';
+    }
+    if (!/(?=.*[!@#$%^&*])/.test(password)) {
+      return 'Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*)';
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isAdmin) {
+      showAlert('error', 'Vous n\'avez pas les privilèges administrateur pour effectuer cette action');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       if (editingTrainer) {
-        // Update existing trainer
+        // Update existing trainer (no password change for updates)
         const { error } = await supabase
           .from('profiles')
           .update({
@@ -176,10 +210,18 @@ function TrainerManagement() {
 
         showAlert('success', 'Formateur mis à jour avec succès');
       } else {
-        // Create new trainer using Edge Function
+        // Validate password for new trainers
+        const passwordError = validatePassword(formData.password);
+        if (passwordError) {
+          showAlert('error', passwordError);
+          return;
+        }
+
+        // Create new trainer using Edge Function with custom password
         const result = await createTrainer({
           name: formData.name,
           email: formData.email,
+          password: formData.password, // Pass the custom password
           phone_number: formData.phone_number,
           function_title: formData.function_title,
           specialties: formData.specialties,
@@ -210,10 +252,16 @@ function TrainerManagement() {
   };
 
   const handleEdit = (trainer: Profile) => {
+    if (!isAdmin) {
+      showAlert('error', 'Vous n\'avez pas les privilèges administrateur pour effectuer cette action');
+      return;
+    }
+
     setEditingTrainer(trainer);
     setFormData({
       name: trainer.name,
       email: trainer.email,
+      password: '', // Don't show existing password
       phone_number: trainer.phone_number || '',
       function_title: trainer.function_title || '',
       specialties: trainer.specialties || [],
@@ -226,6 +274,11 @@ function TrainerManagement() {
   };
 
   const handleDelete = (trainer: Profile) => {
+    if (!isAdmin) {
+      showAlert('error', 'Vous n\'avez pas les privilèges administrateur pour effectuer cette action');
+      return;
+    }
+
     showConfirmDialog(
       'Supprimer le formateur',
       `Êtes-vous sûr de vouloir supprimer le formateur ${trainer.name} ? Cette action est irréversible.`,
@@ -263,6 +316,7 @@ function TrainerManagement() {
     setFormData({
       name: '',
       email: '',
+      password: '',
       phone_number: '',
       function_title: '',
       specialties: [],
@@ -273,6 +327,7 @@ function TrainerManagement() {
     });
     setEditingTrainer(null);
     setShowAddForm(false);
+    setShowPassword(false);
   };
 
   const filteredTrainers = trainers.filter(trainer =>
@@ -342,14 +397,36 @@ function TrainerManagement() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="bg-accent hover:bg-accent-dark text-white px-6 py-3 rounded-lg font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Nouveau formateur</span>
-        </button>
+        {isAdmin ? (
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="bg-accent hover:bg-accent-dark text-white px-6 py-3 rounded-lg font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Nouveau formateur</span>
+          </button>
+        ) : (
+          <div className="flex items-center space-x-2 text-primary-600 bg-primary-100 px-4 py-2 rounded-lg">
+            <Shield className="w-5 h-5" />
+            <span className="text-sm">Accès administrateur requis</span>
+          </div>
+        )}
       </div>
+
+      {/* Admin Access Notice for Non-Admin Users */}
+      {!isAdmin && (
+        <div className="bg-warning bg-opacity-10 border border-warning rounded-xl p-6">
+          <div className="flex items-center space-x-3">
+            <Shield className="w-6 h-6 text-warning" />
+            <div>
+              <h3 className="text-warning font-semibold mb-1">Accès limité</h3>
+              <p className="text-warning-dark text-sm">
+                Vous pouvez consulter la liste des formateurs, mais seuls les administrateurs peuvent créer, modifier ou supprimer des formateurs.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="bg-white backdrop-blur-sm rounded-xl p-6 border border-primary-200 shadow-lg">
@@ -365,8 +442,8 @@ function TrainerManagement() {
         </div>
       </div>
 
-      {/* Add/Edit Form */}
-      {showAddForm && (
+      {/* Add/Edit Form - Only visible to admins */}
+      {showAddForm && isAdmin && (
         <div className="bg-white backdrop-blur-sm rounded-xl border border-primary-200 p-8 shadow-lg">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold text-primary-800">
@@ -468,6 +545,42 @@ function TrainerManagement() {
                   />
                 </div>
               </div>
+
+              {/* Mot de passe (uniquement pour la création) */}
+              {!editingTrainer && (
+                <div>
+                  <label className="block text-primary-700 text-sm font-medium mb-2">
+                    Mot de passe *
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password}
+                      onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                      required={!editingTrainer}
+                      className="w-full pl-11 pr-12 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 placeholder-primary-400 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+                      placeholder="Mot de passe sécurisé"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-primary-400 hover:text-primary-600 transition-colors duration-200"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  <div className="mt-2 text-xs text-primary-600">
+                    <p>Le mot de passe doit contenir :</p>
+                    <ul className="list-disc ml-4 space-y-1">
+                      <li>Au moins 8 caractères</li>
+                      <li>Une lettre minuscule et une majuscule</li>
+                      <li>Un chiffre</li>
+                      <li>Un caractère spécial (!@#$%^&*)</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-primary-700 text-sm font-medium mb-2">
@@ -604,22 +717,24 @@ function TrainerManagement() {
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => handleEdit(trainer)}
-                    className="bg-warning hover:bg-warning-dark text-white p-2 rounded-lg transition-all duration-200 hover:scale-105"
-                    title="Modifier"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(trainer)}
-                    className="bg-error hover:bg-error-dark text-white p-2 rounded-lg transition-all duration-200 hover:scale-105"
-                    title="Supprimer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                {isAdmin && (
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleEdit(trainer)}
+                      className="bg-warning hover:bg-warning-dark text-white p-2 rounded-lg transition-all duration-200 hover:scale-105"
+                      title="Modifier"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(trainer)}
+                      className="bg-error hover:bg-error-dark text-white p-2 rounded-lg transition-all duration-200 hover:scale-105"
+                      title="Supprimer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -637,7 +752,7 @@ function TrainerManagement() {
                 : 'Commencez par ajouter votre premier formateur'
               }
             </p>
-            {!searchTerm && (
+            {!searchTerm && isAdmin && (
               <button
                 onClick={() => setShowAddForm(true)}
                 className="bg-accent hover:bg-accent-dark text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105"

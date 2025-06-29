@@ -84,6 +84,8 @@ function SignaturePage() {
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     setIsDrawing(true);
+    setHasSignature(true);
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -113,7 +115,6 @@ function SignaturePage() {
     if (ctx) {
       ctx.lineTo(x, y);
       ctx.stroke();
-      setHasSignature(true);
     }
   };
 
@@ -137,12 +138,19 @@ function SignaturePage() {
     if (!hasSignature || !trainingId || !participantId) return;
 
     try {
+      // Capture la signature comme une image base64
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const signatureData = canvas.toDataURL('image/png');
+      
       const { error } = await supabase
         .from('participants')
         .update({
           has_signed: true,
           is_present: true,
-          signature_date: new Date().toISOString()
+          signature_date: new Date().toISOString(),
+          signature_data: signatureData // Stocke les données de la signature
         })
         .eq('id', participantId)
         .eq('training_id', trainingId);
@@ -164,11 +172,6 @@ function SignaturePage() {
     return (
       <div className="min-h-screen bg-primary-50 flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
-          <img 
-            src="/Logo JLC MERCURY GRIS.png" 
-            alt="JLC Mercury Logo" 
-            className="w-16 h-16 object-contain animate-pulse"
-          />
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
         </div>
       </div>
@@ -179,11 +182,6 @@ function SignaturePage() {
     return (
       <div className="min-h-screen bg-primary-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl p-8 text-center max-w-md w-full shadow-lg border border-primary-200">
-          <img 
-            src="/Logo JLC MERCURY GRIS.png" 
-            alt="JLC Mercury Logo" 
-            className="w-16 h-16 object-contain mx-auto mb-4"
-          />
           <X className="w-16 h-16 text-error mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-primary-800 mb-4">
             Lien invalide
@@ -200,11 +198,6 @@ function SignaturePage() {
     return (
       <div className="min-h-screen bg-primary-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl p-8 text-center max-w-md w-full animate-scale-in shadow-lg border border-primary-200">
-          <img 
-            src="/Logo JLC MERCURY GRIS.png" 
-            alt="JLC Mercury Logo" 
-            className="w-16 h-16 object-contain mx-auto mb-4"
-          />
           <Check className="w-16 h-16 text-success mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-primary-800 mb-4">
             Signature enregistrée !
@@ -230,16 +223,9 @@ function SignaturePage() {
         <div className="bg-white rounded-xl border border-primary-200 overflow-hidden animate-fade-in shadow-lg">
           {/* Header */}
           <div className="p-6 border-b border-primary-200">
-            <div className="flex items-center space-x-4 mb-4">
-              <img 
-                src="/Logo JLC MERCURY GRIS.png" 
-                alt="JLC Mercury Logo" 
-                className="w-12 h-12 object-contain"
-              />
-              <h1 className="text-2xl font-bold text-primary-800">
-                Signature électronique
-              </h1>
-            </div>
+            <h1 className="text-2xl font-bold text-primary-800">
+              Signature électronique
+            </h1>
             <div className="space-y-2 text-sm">
               <p className="text-primary-700">
                 <strong>Participant :</strong> {participant.name}

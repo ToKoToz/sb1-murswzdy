@@ -1,37 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useData } from '../contexts/DataContext';
 import DatePicker from '../components/ui/DatePicker';
-import { ArrowLeft, Save, Calendar, MapPin, Clock, Building, User, BookOpen, Plus, Users, Check, X, Sun, Moon, CalendarDays } from 'lucide-react';
+import { 
+  ArrowLeft, Save, Calendar, MapPin, Clock, Building, User, 
+  BookOpen, Plus, Users, Check, X, Sun, Moon, CalendarDays,
+  Trash2, AlertCircle
+} from 'lucide-react';
+import Alert from '../components/ui/Alert';
+import { supabase } from '../lib/supabase';
+
+// Type pour un jour de formation
+interface TrainingDay {
+  date: string;
+  hasMorningSchedule: boolean;
+  hasAfternoonSchedule: boolean;
+  start_time_morning: string;
+  end_time_morning: string;
+  start_time_afternoon: string;
+  end_time_afternoon: string;
+}
 
 function CreateTraining() {
   const navigate = useNavigate();
-  const { addTraining, trainers, clients, currentUser } = useData();
+  const { addTraining, trainers, clients, currentUser, refreshTrainings } = useData();
+  
+  // État principal du formulaire
   const [formData, setFormData] = useState({
     title: '',
     company: '',
     location: '',
-    start_date: '',
-    end_date: '',
+    trainer_id: currentUser?.id || '',
+    trainer_name: currentUser?.name || '',
+    status: 'active' as const // Modifier de 'draft' à 'active' pour que les formations créées soient visibles
+  });
+  
+  // Gestion des jours de formation
+  const [trainingDays, setTrainingDays] = useState<TrainingDay[]>([{
+    date: '',
+    hasMorningSchedule: true,
+    hasAfternoonSchedule: true,
     start_time_morning: '09:00',
     end_time_morning: '12:00',
     start_time_afternoon: '13:00',
-    end_time_afternoon: '17:00',
-    trainer_id: currentUser?.id || '',
-    trainer_name: currentUser?.name || '',
-    days: 1,
-    status: 'draft' as const
-  });
-  
-  // Nouveaux états pour les toggles
-  const [hasMorningSchedule, setHasMorningSchedule] = useState(true);
-  const [hasAfternoonSchedule, setHasAfternoonSchedule] = useState(true);
+    end_time_afternoon: '17:00'
+  }]);
   
   const [selectedTrainees, setSelectedTrainees] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [alert, setAlert] = useState<{ 
+    show: boolean; 
+    type: 'success' | 'error' | 'warning' | 'info'; 
+    message: string 
+  }>({ show: false, type: 'info', message: '' });
 
   // Update form data when currentUser changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentUser && !formData.trainer_id) {
       setFormData(prev => ({
         ...prev,
@@ -41,93 +65,180 @@ function CreateTraining() {
     }
   }, [currentUser, formData.trainer_id]);
 
+  const showAlert = (type: 'success' | 'error' | 'warning' | 'info', message: string) => {
+    setAlert({ show: true, type, message });
+    setTimeout(() => {
+      setAlert(prev => ({ ...prev, show: false }));
+    }, 5000);
+  };
+
+  // Ajouter un nouveau jour de formation
+  const addTrainingDay = () => {
+    setTrainingDays(prev => [...prev, {
+      date: '',
+      hasMorningSchedule: true,
+      hasAfternoonSchedule: true,
+      start_time_morning: '09:00',
+      end_time_morning: '12:00',
+      start_time_afternoon: '13:00',
+      end_time_afternoon: '17:00'
+    }]);
+  };
+
+  // Supprimer un jour de formation
+  const removeTrainingDay = (index: number) => {
+    if (trainingDays.length === 1) {
+      showAlert('warning', 'Vous devez avoir au moins un jour de formation');
+      return;
+    }
+    setTrainingDays(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Mettre à jour les informations d'un jour de formation
+  const updateTrainingDay = (index: number, updates: Partial<TrainingDay>) => {
+    setTrainingDays(prev => prev.map((day, i) => 
+      i === index ? { ...day, ...updates } : day
+    ));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validation
+    if (!formData.title || !formData.company || !formData.location || !formData.trainer_id) {
+      showAlert('error', 'Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+
+    if (!trainingDays.some(day => day.date)) {
+      showAlert('error', 'Veuillez sélectionner au moins une date de formation');
+      return;
+    }
+
+    // Vérifier que chaque jour a au moins un horaire (matin ou après-midi)
+    const invalidDays = trainingDays.filter(day => !day.hasMorningSchedule && !day.hasAfternoonSchedule);
+    if (invalidDays.length > 0) {
+      showAlert('error', 'Chaque jour de formation doit avoir au moins un horaire (matin ou après-midi)');
+      return;
+    }
+
+    // Vérifier que toutes les dates sont remplies
+    if (trainingDays.some(day => !day.date)) {
+      showAlert('error', 'Veuillez sélectionner une date pour chaque jour de formation');
+      return;
+    }
+    
+    // Trier les jours par date
+    const sortedDays = [...trainingDays].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
     setIsSubmitting(true);
     
     try {
-      // Validate that we have a valid trainer_id
-      if (!formData.trainer_id) {
-        alert('Veuillez sélectionner un formateur');
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Calculate days between start and end date
-      const start = new Date(formData.start_date);
-      const end = new Date(formData.end_date);
-      const diffTime = Math.abs(end.getTime() - start.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-
-      // Determine start and end times based on active schedules
-      let fullDayStart = '';
-      let fullDayEnd = '';
+      const createdTrainings = [];
       
-      if (hasMorningSchedule && hasAfternoonSchedule) {
-        fullDayStart = formData.start_time_morning;
-        fullDayEnd = formData.end_time_afternoon;
-      } else if (hasMorningSchedule) {
-        fullDayStart = formData.start_time_morning;
-        fullDayEnd = formData.end_time_morning;
-      } else if (hasAfternoonSchedule) {
-        fullDayStart = formData.start_time_afternoon;
-        fullDayEnd = formData.end_time_afternoon;
-      }
+      // Pour chaque jour de formation, créer une formation distincte
+      for (let dayIndex = 0; dayIndex < sortedDays.length; dayIndex++) {
+        const day = sortedDays[dayIndex];
+        
+        // Déterminer les horaires de début et fin en fonction des options choisies
+        let startTime = '';
+        let endTime = '';
+        
+        if (day.hasMorningSchedule && day.hasAfternoonSchedule) {
+          startTime = day.start_time_morning;
+          endTime = day.end_time_afternoon;
+        } else if (day.hasMorningSchedule) {
+          startTime = day.start_time_morning;
+          endTime = day.end_time_morning;
+        } else if (day.hasAfternoonSchedule) {
+          startTime = day.start_time_afternoon;
+          endTime = day.end_time_afternoon;
+        }
 
-      const trainingData = {
-        title: formData.title,
-        company: formData.company,
-        location: formData.location,
-        start_date: formData.start_date,
-        end_date: formData.end_date,
-        start_time: fullDayStart,
-        end_time: fullDayEnd,
-        trainer_id: formData.trainer_id,
-        trainer_name: formData.trainer_name,
-        days: diffDays,
-        status: formData.status
-      };
+        const trainingData = {
+          title: sortedDays.length > 1 
+            ? `${formData.title} (Jour ${dayIndex + 1}/${sortedDays.length})` 
+            : formData.title,
+          company: formData.company,
+          location: formData.location,
+          start_date: day.date,
+          end_date: day.date, // Même date car une journée à la fois
+          start_time: startTime,
+          end_time: endTime,
+          trainer_id: formData.trainer_id,
+          trainer_name: formData.trainer_name,
+          days: 1, // Toujours 1 car chaque jour est une formation distincte
+          status: formData.status // Statut 'active' par défaut
+        };
 
-      const result = await addTraining(trainingData);
-      
-      if (result) {
-        // Add selected trainees as participants
-        if (selectedTrainees.length > 0) {
-          const selectedClient = clients.find(c => c.name === formData.company);
-          if (selectedClient && selectedClient.employees) {
-            const selectedEmployees = selectedClient.employees.filter(emp => 
-              selectedTrainees.includes(emp.id)
-            );
-
-            // Add participants using the addParticipant function from DataContext
-            const { addParticipant } = await import('../contexts/DataContext');
-            
-            for (const employee of selectedEmployees) {
-              await fetch('/api/participants', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  training_id: result.id,
-                  name: `${employee.first_name} ${employee.last_name}`,
-                  email: employee.email,
-                  company: formData.company,
-                  has_signed: false,
-                  is_present: false,
-                  signature_date: null
-                })
-              });
+        const result = await addTraining(trainingData);
+        
+        if (result) {
+          createdTrainings.push(result);
+          
+          // Si c'est le premier jour et qu'on a des participants sélectionnés, les ajouter
+          if (dayIndex === 0 && selectedTrainees.length > 0) {
+            const selectedClient = clients.find(c => c.name === formData.company);
+            if (selectedClient && selectedClient.employees) {
+              const selectedEmployees = selectedClient.employees.filter(emp => 
+                selectedTrainees.includes(emp.id)
+              );
+              
+              // Préparer les participants pour l'insertion groupée
+              const participantsToInsert = selectedEmployees.map(employee => ({
+                training_id: result.id,
+                name: `${employee.first_name} ${employee.last_name}`,
+                email: employee.email,
+                company: formData.company,
+                has_signed: false,
+                is_present: false,
+                signature_date: null
+              }));
+              
+              // Insérer tous les participants en une seule requête
+              if (participantsToInsert.length > 0) {
+                try {
+                  const { error } = await supabase
+                    .from('participants')
+                    .insert(participantsToInsert);
+                    
+                  if (error) {
+                    console.error('Error adding participants:', error);
+                    showAlert('error', 'Erreur lors de l\'ajout des participants');
+                  }
+                } catch (error) {
+                  console.error('Error adding participants:', error);
+                  showAlert('error', 'Erreur lors de l\'ajout des participants');
+                }
+              }
             }
           }
+        } else {
+          showAlert('error', 'Erreur lors de la création de la formation');
+          setIsSubmitting(false);
+          return;
         }
-        
-        navigate('/trainings');
-      } else {
-        alert('Erreur lors de la création de la formation');
       }
+      
+      // Rafraîchir les données pour s'assurer que les participants sont chargés
+      await refreshTrainings();
+      
+      // Attendre un moment pour s'assurer que les données sont propagées
+      setTimeout(() => {
+        setIsSubmitting(false);
+        
+        // Rediriger vers le détail de la première formation créée
+        if (createdTrainings.length > 0) {
+          navigate(`/trainings/${createdTrainings[0].id}`);
+        } else {
+          // Fallback vers la liste des formations
+          navigate('/trainings');
+        }
+      }, 1000);
+      
     } catch (error) {
       console.error('Error creating training:', error);
-      alert('Erreur lors de la création de la formation');
-    } finally {
+      showAlert('error', 'Erreur lors de la création de la formation');
       setIsSubmitting(false);
     }
   };
@@ -135,24 +246,6 @@ function CreateTraining() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleDateChange = (field: 'start_date' | 'end_date') => (date: string) => {
-    setFormData(prev => {
-      const newData = { ...prev, [field]: date };
-      
-      // Auto-set end date to start date if it's a new training and end date is empty
-      if (field === 'start_date' && !prev.end_date) {
-        newData.end_date = date;
-      }
-      
-      // Ensure end date is not before start date
-      if (field === 'start_date' && prev.end_date && date > prev.end_date) {
-        newData.end_date = date;
-      }
-      
-      return newData;
-    });
   };
 
   const handleTrainerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -196,28 +289,13 @@ function CreateTraining() {
     setSelectedTrainees([]);
   };
 
-  // Validation: au moins un horaire doit être activé
-  const isScheduleValid = hasMorningSchedule || hasAfternoonSchedule;
-
-  // Calculate duration info
-  const getDurationInfo = () => {
-    if (!formData.start_date || !formData.end_date) return null;
-    
-    const start = new Date(formData.start_date);
-    const end = new Date(formData.end_date);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    
-    return {
-      days: diffDays,
-      isMultiDay: diffDays > 1,
-      isSameDay: diffDays === 1
-    };
-  };
-
-  const durationInfo = getDurationInfo();
   const selectedClient = clients.find(c => c.name === formData.company);
   const availableEmployees = selectedClient?.employees || [];
+
+  // Fonction pour vérifier si tous les jours ont au moins un horaire activé
+  const areAllDaysValid = () => {
+    return trainingDays.every(day => day.hasMorningSchedule || day.hasAfternoonSchedule);
+  };
 
   // Show loading state if currentUser is not loaded yet
   if (!currentUser) {
@@ -233,6 +311,15 @@ function CreateTraining() {
 
   return (
     <div className="space-y-6">
+      {/* Alerte */}
+      {alert.show && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(prev => ({ ...prev, show: false }))}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center space-x-4">
         <Link
@@ -241,11 +328,6 @@ function CreateTraining() {
         >
           <ArrowLeft className="w-6 h-6" />
         </Link>
-        <img 
-          src="/Logo JLC MERCURY GRIS.png" 
-          alt="JLC Mercury Logo" 
-          className="w-10 h-10 object-contain"
-        />
         <div>
           <h1 className="text-3xl font-bold text-primary-800 mb-2">
             Nouvelle Formation
@@ -319,6 +401,109 @@ function CreateTraining() {
             </div>
           </div>
 
+          {/* Trainees Selection - MOVED UP */}
+          <div>
+            <h2 className="text-xl font-semibold text-primary-800 mb-6 flex items-center">
+              <Users className="w-6 h-6 mr-3 text-accent" />
+              Stagiaires
+            </h2>
+            
+            {formData.company && availableEmployees.length > 0 ? (
+              <div className="space-y-4">
+                {/* Selection Controls */}
+                <div className="flex items-center justify-between bg-primary-50 p-4 rounded-lg">
+                  <div className="flex items-center space-x-4">
+                    <span className="text-primary-700 font-medium">
+                      {selectedTrainees.length} / {availableEmployees.length} sélectionné(s)
+                    </span>
+                  </div>
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={selectAllTrainees}
+                      className="px-3 py-1 bg-success hover:bg-success-dark text-white rounded text-sm transition-colors duration-200"
+                    >
+                      Tout sélectionner
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deselectAllTrainees}
+                      className="px-3 py-1 bg-error hover:bg-error-dark text-white rounded text-sm transition-colors duration-200"
+                    >
+                      Tout désélectionner
+                    </button>
+                  </div>
+                </div>
+
+                {/* Employees List */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {availableEmployees.map((employee) => (
+                    <div
+                      key={employee.id}
+                      className={`p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 ${
+                        selectedTrainees.includes(employee.id)
+                          ? 'border-accent bg-accent bg-opacity-10'
+                          : 'border-primary-300 bg-white hover:border-accent'
+                      }`}
+                      onClick={() => toggleTrainee(employee.id)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <h4 className="text-primary-800 font-medium">
+                            {employee.first_name} {employee.last_name}
+                          </h4>
+                          <p className="text-primary-600 text-sm">{employee.email}</p>
+                        </div>
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                          selectedTrainees.includes(employee.id)
+                            ? 'border-accent bg-accent'
+                            : 'border-primary-300'
+                        }`}>
+                          {selectedTrainees.includes(employee.id) && (
+                            <Check className="w-4 h-4 text-white" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Message si aucun stagiaire sélectionné */}
+                {selectedTrainees.length === 0 && (
+                  <div className="text-center py-8 bg-primary-50 rounded-lg border border-primary-200">
+                    <Users className="w-12 h-12 text-primary-400 mx-auto mb-4" />
+                    <p className="text-primary-600">
+                      Sélectionnez les employés qui participeront à cette formation
+                    </p>
+                    <p className="text-primary-600 mt-2 text-sm">
+                      <strong>Note :</strong> Les stagiaires sélectionnés seront inscrits à tous les jours de cette formation
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-primary-50 rounded-lg border border-primary-200">
+                <Users className="w-12 h-12 text-primary-400 mx-auto mb-4" />
+                {!formData.company ? (
+                  <p className="text-primary-600 mb-2">
+                    Veuillez sélectionner une société pour afficher les stagiaires disponibles
+                  </p>
+                ) : (
+                  <p className="text-primary-600 mb-2">
+                    Aucun employé trouvé pour ce client
+                  </p>
+                )}
+                <Link
+                  to="/clients"
+                  className="inline-flex items-center space-x-1 text-accent hover:text-accent-dark font-medium"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Ajouter des employés au client</span>
+                </Link>
+              </div>
+            )}
+          </div>
+
           {/* Location and Trainer */}
           <div>
             <h2 className="text-xl font-semibold text-primary-800 mb-6 flex items-center">
@@ -354,374 +539,267 @@ function CreateTraining() {
                     className="w-full pl-11 pr-8 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
                   >
                     <option value={currentUser.id}>{currentUser.name} (Vous)</option>
-                    {trainers.map(trainer => (
-                      <option key={trainer.id} value={trainer.id}>
-                        {trainer.name}
-                      </option>
-                    ))}
+                    {trainers
+                      .filter(trainer => trainer.id !== currentUser.id)
+                      .map(trainer => (
+                        <option key={trainer.id} value={trainer.id}>
+                          {trainer.name}
+                        </option>
+                      ))
+                    }
                   </select>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Dates and Times */}
+          {/* Dates et horaires (nouveau format) */}
           <div>
             <h2 className="text-xl font-semibold text-primary-800 mb-6 flex items-center">
-              <Calendar className="w-6 h-6 mr-3 text-accent" />
-              Dates et horaires
+              <CalendarDays className="w-6 h-6 mr-3 text-accent" />
+              Jours de Formation
+              <span className="ml-2 px-2.5 py-0.5 bg-primary-100 text-primary-800 text-sm rounded-full">
+                {trainingDays.length} {trainingDays.length > 1 ? 'jours' : 'jour'}
+              </span>
             </h2>
-            
-            {/* Dates */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div>
-                <label className="block text-primary-700 text-sm font-medium mb-2">
-                  Date de début *
-                </label>
-                <DatePicker
-                  value={formData.start_date}
-                  onChange={handleDateChange('start_date')}
-                  placeholder="Sélectionner la date de début"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-primary-700 text-sm font-medium mb-2">
-                  Date de fin *
-                </label>
-                <DatePicker
-                  value={formData.end_date}
-                  onChange={handleDateChange('end_date')}
-                  placeholder="Sélectionner la date de fin"
-                  min={formData.start_date}
-                  required
-                />
-              </div>
-            </div>
 
-            {/* Duration Info */}
-            {durationInfo && (
-              <div className="mb-6 p-4 bg-gradient-to-r from-accent to-accent-light bg-opacity-10 border border-accent border-opacity-30 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <CalendarDays className="w-5 h-5 text-accent" />
-                  <div>
-                    <h4 className="text-primary-800 font-medium">
-                      Durée de la formation : {durationInfo.days} jour{durationInfo.days > 1 ? 's' : ''}
+            {/* Liste des jours */}
+            <div className="space-y-8">
+              {trainingDays.map((day, index) => (
+                <div 
+                  key={index} 
+                  className="p-6 border border-primary-200 rounded-lg shadow-sm bg-white relative"
+                >
+                  {/* En-tête du jour */}
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="font-semibold text-lg text-primary-800 flex items-center">
+                      <Calendar className="w-5 h-5 mr-2 text-accent" />
+                      Jour {index + 1}
+                    </h3>
+                    {trainingDays.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeTrainingDay(index)}
+                        className="text-error hover:text-error-dark transition-colors p-1.5 rounded-full hover:bg-error-light hover:bg-opacity-20"
+                        title="Supprimer ce jour"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Sélection de date */}
+                  <div className="mb-6">
+                    <label className="block text-primary-700 text-sm font-medium mb-2">
+                      Date *
+                    </label>
+                    <DatePicker
+                      value={day.date}
+                      onChange={(date: string) => updateTrainingDay(index, { date })}
+                      placeholder="Sélectionner la date"
+                      required
+                    />
+                  </div>
+
+                  {/* Schedule Toggles */}
+                  <div className="mb-6 p-4 bg-primary-50 rounded-lg border border-primary-200">
+                    <h4 className="text-md font-medium text-primary-800 mb-4">
+                      Périodes de formation
                     </h4>
-                    <p className="text-primary-600 text-sm">
-                      {durationInfo.isSameDay 
-                        ? 'Formation sur une journée' 
-                        : `Formation sur ${durationInfo.days} jours consécutifs`
-                      }
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Morning Toggle */}
+                      <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-primary-300">
+                        <div className="flex items-center space-x-3">
+                          <Sun className="w-5 h-5 text-yellow-600" />
+                          <span className="text-primary-800 font-medium">Formation le matin</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateTrainingDay(index, { hasMorningSchedule: !day.hasMorningSchedule })}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                            day.hasMorningSchedule ? 'bg-accent' : 'bg-primary-300'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                              day.hasMorningSchedule ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
 
-            {/* Schedule Toggles */}
-            <div className="mb-6 p-4 bg-primary-50 rounded-lg border border-primary-200">
-              <h3 className="text-lg font-medium text-primary-800 mb-4">
-                Périodes de formation
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Morning Toggle */}
-                <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-primary-300">
-                  <div className="flex items-center space-x-3">
-                    <Sun className="w-5 h-5 text-yellow-600" />
-                    <span className="text-primary-800 font-medium">Formation le matin</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setHasMorningSchedule(!hasMorningSchedule)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                      hasMorningSchedule ? 'bg-accent' : 'bg-primary-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                        hasMorningSchedule ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
+                      {/* Afternoon Toggle */}
+                      <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-primary-300">
+                        <div className="flex items-center space-x-3">
+                          <Moon className="w-5 h-5 text-blue-600" />
+                          <span className="text-primary-800 font-medium">Formation l'après-midi</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateTrainingDay(index, { hasAfternoonSchedule: !day.hasAfternoonSchedule })}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                            day.hasAfternoonSchedule ? 'bg-accent' : 'bg-primary-300'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                              day.hasAfternoonSchedule ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
 
-                {/* Afternoon Toggle */}
-                <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-primary-300">
-                  <div className="flex items-center space-x-3">
-                    <Moon className="w-5 h-5 text-blue-600" />
-                    <span className="text-primary-800 font-medium">Formation l'après-midi</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setHasAfternoonSchedule(!hasAfternoonSchedule)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                      hasAfternoonSchedule ? 'bg-accent' : 'bg-primary-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                        hasAfternoonSchedule ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Validation Message */}
-              {!isScheduleValid && (
-                <div className="mt-4 p-3 bg-error-light bg-opacity-20 border border-error rounded-lg">
-                  <p className="text-error-dark text-sm">
-                    ⚠️ Vous devez sélectionner au moins une période (matin ou après-midi)
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Morning Schedule */}
-            {hasMorningSchedule && (
-              <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-lg p-6 mb-6">
-                <h3 className="text-lg font-semibold text-primary-800 mb-4 flex items-center">
-                  <Sun className="w-5 h-5 mr-2 text-yellow-600" />
-                  Horaires du matin
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-primary-700 text-sm font-medium mb-2">
-                      Heure de début matin *
-                    </label>
-                    <div className="relative">
-                      <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
-                      <input
-                        type="time"
-                        name="start_time_morning"
-                        value={formData.start_time_morning}
-                        onChange={handleChange}
-                        required={hasMorningSchedule}
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-primary-700 text-sm font-medium mb-2">
-                      Heure de fin matin *
-                    </label>
-                    <div className="relative">
-                      <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
-                      <input
-                        type="time"
-                        name="end_time_morning"
-                        value={formData.end_time_morning}
-                        onChange={handleChange}
-                        required={hasMorningSchedule}
-                        min={formData.start_time_morning}
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Afternoon Schedule */}
-            {hasAfternoonSchedule && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
-                <h3 className="text-lg font-semibold text-primary-800 mb-4 flex items-center">
-                  <Moon className="w-5 h-5 mr-2 text-blue-600" />
-                  Horaires de l'après-midi
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-primary-700 text-sm font-medium mb-2">
-                      Heure de début après-midi *
-                    </label>
-                    <div className="relative">
-                      <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
-                      <input
-                        type="time"
-                        name="start_time_afternoon"
-                        value={formData.start_time_afternoon}
-                        onChange={handleChange}
-                        required={hasAfternoonSchedule}
-                        min={hasMorningSchedule ? formData.end_time_morning : undefined}
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-primary-700 text-sm font-medium mb-2">
-                      Heure de fin après-midi *
-                    </label>
-                    <div className="relative">
-                      <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
-                      <input
-                        type="time"
-                        name="end_time_afternoon"
-                        value={formData.end_time_afternoon}
-                        onChange={handleChange}
-                        required={hasAfternoonSchedule}
-                        min={formData.start_time_afternoon}
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Schedule Summary */}
-            {isScheduleValid && (
-              <div className="p-4 bg-accent bg-opacity-10 border border-accent border-opacity-30 rounded-lg">
-                <h4 className="text-primary-800 font-medium mb-3 flex items-center">
-                  <Clock className="w-4 h-4 mr-2" />
-                  Résumé des horaires :
-                </h4>
-                <div className="space-y-2">
-                  {hasMorningSchedule && (
-                    <div className="flex items-center space-x-2">
-                      <span className="w-3 h-3 bg-yellow-400 rounded-full"></span>
-                      <span className="text-primary-700">
-                        <strong>Matin :</strong> {formData.start_time_morning} - {formData.end_time_morning}
-                      </span>
-                    </div>
-                  )}
-                  {hasAfternoonSchedule && (
-                    <div className="flex items-center space-x-2">
-                      <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
-                      <span className="text-primary-700">
-                        <strong>Après-midi :</strong> {formData.start_time_afternoon} - {formData.end_time_afternoon}
-                      </span>
-                    </div>
-                  )}
-                  {hasMorningSchedule && hasAfternoonSchedule && (
-                    <div className="flex items-center space-x-2 pt-2 border-t border-accent border-opacity-20">
-                      <span className="w-3 h-3 bg-accent rounded-full"></span>
-                      <span className="text-primary-700">
-                        <strong>Journée complète :</strong> {formData.start_time_morning} - {formData.end_time_afternoon}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Trainees Selection */}
-          {formData.company && (
-            <div>
-              <h2 className="text-xl font-semibold text-primary-800 mb-6 flex items-center">
-                <Users className="w-6 h-6 mr-3 text-accent" />
-                Stagiaires
-              </h2>
-              
-              {availableEmployees.length > 0 ? (
-                <div className="space-y-4">
-                  {/* Selection Controls */}
-                  <div className="flex items-center justify-between bg-primary-50 p-4 rounded-lg">
-                    <div className="flex items-center space-x-4">
-                      <span className="text-primary-700 font-medium">
-                        {selectedTrainees.length} / {availableEmployees.length} sélectionné(s)
-                      </span>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        type="button"
-                        onClick={selectAllTrainees}
-                        className="px-3 py-1 bg-success hover:bg-success-dark text-white rounded text-sm transition-colors duration-200"
-                      >
-                        Tout sélectionner
-                      </button>
-                      <button
-                        type="button"
-                        onClick={deselectAllTrainees}
-                        className="px-3 py-1 bg-error hover:bg-error-dark text-white rounded text-sm transition-colors duration-200"
-                      >
-                        Tout désélectionner
-                      </button>
-                    </div>
+                    {/* Validation Message */}
+                    {!day.hasMorningSchedule && !day.hasAfternoonSchedule && (
+                      <div className="mt-4 p-3 bg-error-light bg-opacity-20 border border-error rounded-lg">
+                        <p className="text-error-dark text-sm flex items-center">
+                          <AlertCircle className="w-4 h-4 mr-2" />
+                          Vous devez sélectionner au moins une période (matin ou après-midi)
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Employees List */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {availableEmployees.map((employee) => (
-                      <div
-                        key={employee.id}
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 ${
-                          selectedTrainees.includes(employee.id)
-                            ? 'border-accent bg-accent bg-opacity-10'
-                            : 'border-primary-300 bg-white hover:border-accent'
-                        }`}
-                        onClick={() => toggleTrainee(employee.id)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <h4 className="text-primary-800 font-medium">
-                              {employee.first_name} {employee.last_name}
-                            </h4>
-                            <p className="text-primary-600 text-sm">{employee.email}</p>
+                  {/* Horaires détaillés */}
+                  <div className="space-y-6">
+                    {/* Morning Schedule */}
+                    {day.hasMorningSchedule && (
+                      <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-lg p-6">
+                        <h4 className="text-lg font-semibold text-primary-800 mb-4 flex items-center">
+                          <Sun className="w-5 h-5 mr-2 text-yellow-600" />
+                          Horaires du matin
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div>
+                            <label className="block text-primary-700 text-sm font-medium mb-2">
+                              Heure de début matin *
+                            </label>
+                            <div className="relative">
+                              <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
+                              <input
+                                type="time"
+                                value={day.start_time_morning}
+                                onChange={(e) => updateTrainingDay(index, { start_time_morning: e.target.value })}
+                                required={day.hasMorningSchedule}
+                                className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+                              />
+                            </div>
                           </div>
-                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                            selectedTrainees.includes(employee.id)
-                              ? 'border-accent bg-accent'
-                              : 'border-primary-300'
-                          }`}>
-                            {selectedTrainees.includes(employee.id) && (
-                              <Check className="w-4 h-4 text-white" />
-                            )}
+                          <div>
+                            <label className="block text-primary-700 text-sm font-medium mb-2">
+                              Heure de fin matin *
+                            </label>
+                            <div className="relative">
+                              <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
+                              <input
+                                type="time"
+                                value={day.end_time_morning}
+                                onChange={(e) => updateTrainingDay(index, { end_time_morning: e.target.value })}
+                                required={day.hasMorningSchedule}
+                                min={day.start_time_morning}
+                                className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Afternoon Schedule */}
+                    {day.hasAfternoonSchedule && (
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+                        <h4 className="text-lg font-semibold text-primary-800 mb-4 flex items-center">
+                          <Moon className="w-5 h-5 mr-2 text-blue-600" />
+                          Horaires de l'après-midi
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div>
+                            <label className="block text-primary-700 text-sm font-medium mb-2">
+                              Heure de début après-midi *
+                            </label>
+                            <div className="relative">
+                              <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
+                              <input
+                                type="time"
+                                value={day.start_time_afternoon}
+                                onChange={(e) => updateTrainingDay(index, { start_time_afternoon: e.target.value })}
+                                required={day.hasAfternoonSchedule}
+                                min={day.hasMorningSchedule ? day.end_time_morning : undefined}
+                                className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-primary-700 text-sm font-medium mb-2">
+                              Heure de fin après-midi *
+                            </label>
+                            <div className="relative">
+                              <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-primary-400" />
+                              <input
+                                type="time"
+                                value={day.end_time_afternoon}
+                                onChange={(e) => updateTrainingDay(index, { end_time_afternoon: e.target.value })}
+                                required={day.hasAfternoonSchedule}
+                                min={day.start_time_afternoon}
+                                className="w-full pl-11 pr-4 py-3 bg-white border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Schedule Summary */}
+                    {(day.hasMorningSchedule || day.hasAfternoonSchedule) && (
+                      <div className="p-4 bg-accent bg-opacity-10 border border-accent border-opacity-30 rounded-lg">
+                        <h4 className="text-primary-800 font-medium mb-3 flex items-center">
+                          <Clock className="w-4 h-4 mr-2" />
+                          Résumé des horaires :
+                        </h4>
+                        <div className="space-y-2">
+                          {day.hasMorningSchedule && (
+                            <div className="flex items-center space-x-2">
+                              <span className="w-3 h-3 bg-yellow-400 rounded-full"></span>
+                              <span className="text-primary-700">
+                                <strong>Matin :</strong> {day.start_time_morning} - {day.end_time_morning}
+                              </span>
+                            </div>
+                          )}
+                          {day.hasAfternoonSchedule && (
+                            <div className="flex items-center space-x-2">
+                              <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
+                              <span className="text-primary-700">
+                                <strong>Après-midi :</strong> {day.start_time_afternoon} - {day.end_time_afternoon}
+                              </span>
+                            </div>
+                          )}
+                          {day.hasMorningSchedule && day.hasAfternoonSchedule && (
+                            <div className="flex items-center space-x-2 pt-2 border-t border-accent border-opacity-20">
+                              <span className="w-3 h-3 bg-accent rounded-full"></span>
+                              <span className="text-primary-700">
+                                <strong>Journée complète :</strong> {day.start_time_morning} - {day.end_time_afternoon}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {selectedTrainees.length === 0 && (
-                    <div className="text-center py-8 bg-primary-50 rounded-lg border border-primary-200">
-                      <Users className="w-12 h-12 text-primary-400 mx-auto mb-4" />
-                      <p className="text-primary-600">
-                        Sélectionnez les employés qui participeront à cette formation
-                      </p>
-                    </div>
-                  )}
                 </div>
-              ) : (
-                <div className="text-center py-8 bg-primary-50 rounded-lg border border-primary-200">
-                  <Users className="w-12 h-12 text-primary-400 mx-auto mb-4" />
-                  <p className="text-primary-600 mb-2">
-                    Aucun employé trouvé pour ce client
-                  </p>
-                  <Link
-                    to="/clients"
-                    className="inline-flex items-center space-x-1 text-accent hover:text-accent-dark font-medium"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Ajouter des employés au client</span>
-                  </Link>
-                </div>
-              )}
+              ))}
             </div>
-          )}
 
-          {/* Status */}
-          <div>
-            <h2 className="text-xl font-semibold text-primary-800 mb-6">
-              Statut de la formation
-            </h2>
-            <div>
-              <label className="block text-primary-700 text-sm font-medium mb-2">
-                Statut initial
-              </label>
-              <select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                className="w-full max-w-xs px-4 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
+            {/* Bouton pour ajouter un jour */}
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={addTrainingDay}
+                className="bg-accent hover:bg-accent-dark text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 hover:scale-105 flex items-center space-x-2"
               >
-                <option value="draft">Brouillon</option>
-                <option value="active">Active</option>
-              </select>
-              <p className="text-primary-600 text-sm mt-2">
-                Vous pourrez modifier le statut plus tard
-              </p>
+                <Plus className="w-5 h-5" />
+                <span>Ajouter un jour</span>
+              </button>
             </div>
           </div>
 
@@ -735,11 +813,13 @@ function CreateTraining() {
             </Link>
             <button
               type="submit"
-              disabled={isSubmitting || !isScheduleValid}
+              disabled={isSubmitting || !areAllDaysValid() || trainingDays.some(day => !day.date)}
               className="px-6 py-3 bg-accent hover:bg-accent-dark text-white rounded-lg font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="w-5 h-5" />
-              <span>{isSubmitting ? 'Création...' : 'Créer la formation'}</span>
+              <span>
+                {isSubmitting ? 'Création...' : `Créer ${trainingDays.length > 1 ? 'les formations' : 'la formation'}`}
+              </span>
             </button>
           </div>
         </form>

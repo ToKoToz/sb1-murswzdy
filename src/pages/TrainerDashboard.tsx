@@ -117,7 +117,8 @@ function TrainerDashboard() {
       if (sessionsError) throw sessionsError;
 
       setStats({
-        assignedTrainings: trainings?.length || 0,
+        // Exclure les formations en brouillon pour les statistiques
+        assignedTrainings: trainings?.filter(t => t.status !== 'draft').length || 0,
         totalParticipants: participants?.length || 0,
         completedTrainings: trainings?.filter(t => t.status === 'completed').length || 0,
         averageRating: 4.7, // Mock data - would come from evaluations
@@ -148,7 +149,7 @@ function TrainerDashboard() {
         `)
         .eq('trainer_id', user.id)
         .gte('start_date', today)
-        .in('status', ['active', 'draft'])
+        .eq('status', 'active') // Uniquement les formations actives (pas les brouillons)
         .order('start_date', { ascending: true })
         .limit(5);
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { User, UserRole, UserInvitation } from '../types/auth';
 import {
   Users,
   Plus,
@@ -25,18 +24,45 @@ import {
   MoreHorizontal
 } from 'lucide-react';
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  phone_number?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface UserRole {
+  id: string;
+  name: string;
+  display_name: string;
+  description?: string;
+}
+
+interface UserInvitation {
+  id: string;
+  email: string;
+  role_id: string;
+  role?: UserRole;
+  invited_by_id?: string;
+  invited_by?: { name: string };
+  token: string;
+  expires_at: string;
+  status: string;
+  created_at: string;
+}
+
 function UserManagement() {
-  const { user: currentUser, hasPermission } = useAuth();
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [invitations, setInvitations] = useState<UserInvitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [inviteForm, setInviteForm] = useState({
     email: '',
     roleId: '',
@@ -44,10 +70,8 @@ function UserManagement() {
   });
 
   useEffect(() => {
-    if (hasPermission('users:read')) {
-      loadData();
-    }
-  }, [hasPermission]);
+    loadData();
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -66,12 +90,8 @@ function UserManagement() {
 
   const loadUsers = async () => {
     const { data, error } = await supabase
-      .from('user_profiles')
-      .select(`
-        *,
-        role:user_roles(*),
-        preferences:user_preferences(*)
-      `)
+      .from('profiles')
+      .select('*')
       .order('created_at', { ascending: false });
 
     if (!error && data) {
@@ -96,7 +116,7 @@ function UserManagement() {
       .select(`
         *,
         role:user_roles(*),
-        invited_by:user_profiles(first_name, last_name)
+        invited_by:profiles(name)
       `)
       .order('created_at', { ascending: false });
 
@@ -137,21 +157,6 @@ function UserManagement() {
     }
   };
 
-  const handleUpdateUserStatus = async (userId: string, status: string) => {
-    try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ status })
-        .eq('id', userId);
-
-      if (!error) {
-        await loadUsers();
-      }
-    } catch (error) {
-      console.error('Error updating user status:', error);
-    }
-  };
-
   const generateInviteToken = () => {
     return Array.from(crypto.getRandomValues(new Uint8Array(32)))
       .map(b => b.toString(16).padStart(2, '0'))
@@ -164,46 +169,32 @@ function UserManagement() {
     console.log('Invitation email would be sent to:', email, 'with URL:', inviteUrl);
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (role: string) => {
     const statusMap = {
-      active: { color: 'bg-success text-white', icon: CheckCircle },
-      inactive: { color: 'bg-primary-400 text-white', icon: XCircle },
-      suspended: { color: 'bg-error text-white', icon: Ban },
-      pending_verification: { color: 'bg-warning text-white', icon: Clock }
+      admin: { color: 'bg-error text-white', icon: Shield },
+      trainer: { color: 'bg-accent text-white', icon: Users }
     };
 
-    const config = statusMap[status as keyof typeof statusMap] || statusMap.inactive;
+    const config = statusMap[role as keyof typeof statusMap] || { color: 'bg-primary-400 text-white', icon: Users };
     const Icon = config.icon;
 
     return (
       <span className={`inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
         <Icon className="w-3 h-3" />
-        <span>{status === 'pending_verification' ? 'En attente' : status}</span>
+        <span>{role === 'admin' ? 'Administrateur' : role === 'trainer' ? 'Formateur' : role}</span>
       </span>
     );
   };
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
-      user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.email.toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesRole = roleFilter === 'all' || user.role?.name === roleFilter;
-    const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     
-    return matchesSearch && matchesRole && matchesStatus;
+    return matchesSearch && matchesRole;
   });
-
-  if (!hasPermission('users:read')) {
-    return (
-      <div className="text-center py-12">
-        <Shield className="w-16 h-16 text-primary-400 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-primary-800 mb-2">Accès restreint</h2>
-        <p className="text-primary-600">Vous n'avez pas les permissions pour voir cette page.</p>
-      </div>
-    );
-  }
 
   if (loading) {
     return (
@@ -241,8 +232,8 @@ function UserManagement() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
           { label: 'Total utilisateurs', value: users.length, icon: Users, color: 'from-accent to-accent-dark' },
-          { label: 'Utilisateurs actifs', value: users.filter(u => u.status === 'active').length, icon: CheckCircle, color: 'from-success to-success-dark' },
-          { label: 'En attente', value: users.filter(u => u.status === 'pending_verification').length, icon: Clock, color: 'from-warning to-warning-dark' },
+          { label: 'Administrateurs', value: users.filter(u => u.role === 'admin').length, icon: Shield, color: 'from-error to-error-dark' },
+          { label: 'Formateurs', value: users.filter(u => u.role === 'trainer').length, icon: Users, color: 'from-warning to-warning-dark' },
           { label: 'Invitations envoyées', value: invitations.filter(i => i.status === 'pending').length, icon: Mail, color: 'from-primary-600 to-primary-500' }
         ].map((stat, index) => {
           const Icon = stat.icon;
@@ -280,25 +271,12 @@ function UserManagement() {
               className="w-full pl-11 pr-8 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
             >
               <option value="all">Tous les rôles</option>
-              {roles.map(role => (
-                <option key={role.id} value={role.name}>{role.displayName}</option>
-              ))}
+              <option value="admin">Administrateur</option>
+              <option value="trainer">Formateur</option>
             </select>
           </div>
 
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-4 py-3 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
-            >
-              <option value="all">Tous les statuts</option>
-              <option value="active">Actif</option>
-              <option value="inactive">Inactif</option>
-              <option value="suspended">Suspendu</option>
-              <option value="pending_verification">En attente</option>
-            </select>
-          </div>
+          <div></div>
 
           <button className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-3 rounded-lg font-medium transition-colors duration-200 flex items-center justify-center space-x-2">
             <Download className="w-4 h-4" />
@@ -315,8 +293,7 @@ function UserManagement() {
               <tr>
                 <th className="text-left py-4 px-6 text-primary-800 font-semibold">Utilisateur</th>
                 <th className="text-left py-4 px-6 text-primary-800 font-semibold">Rôle</th>
-                <th className="text-left py-4 px-6 text-primary-800 font-semibold">Statut</th>
-                <th className="text-left py-4 px-6 text-primary-800 font-semibold">Dernière connexion</th>
+                <th className="text-left py-4 px-6 text-primary-800 font-semibold">Date de création</th>
                 <th className="text-left py-4 px-6 text-primary-800 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -326,57 +303,43 @@ function UserManagement() {
                   <td className="py-4 px-6">
                     <div className="flex items-center space-x-4">
                       <div className="w-10 h-10 bg-gradient-to-r from-accent to-accent-dark rounded-full flex items-center justify-center text-white font-semibold">
-                        {user.firstName.charAt(0)}{user.lastName.charAt(0)}
+                        {user.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
                         <h3 className="text-primary-800 font-medium">
-                          {user.firstName} {user.lastName}
+                          {user.name}
                         </h3>
                         <p className="text-primary-600 text-sm">{user.email}</p>
-                        {user.phone && (
+                        {user.phone_number && (
                           <p className="text-primary-500 text-xs flex items-center space-x-1">
                             <Phone className="w-3 h-3" />
-                            <span>{user.phone}</span>
+                            <span>{user.phone_number}</span>
                           </p>
                         )}
                       </div>
                     </div>
                   </td>
                   <td className="py-4 px-6">
-                    <span className="inline-flex items-center space-x-1 px-3 py-1 bg-accent bg-opacity-10 text-accent rounded-full text-sm font-medium">
-                      <Shield className="w-3 h-3" />
-                      <span>{user.role?.displayName}</span>
-                    </span>
-                  </td>
-                  <td className="py-4 px-6">
-                    {getStatusBadge(user.status)}
+                    {getStatusBadge(user.role)}
                   </td>
                   <td className="py-4 px-6">
                     <div className="text-primary-700 text-sm">
-                      {user.lastLoginAt ? (
-                        <div className="flex items-center space-x-1">
-                          <Calendar className="w-3 h-3" />
-                          <span>{new Date(user.lastLoginAt).toLocaleDateString('fr-FR')}</span>
-                        </div>
-                      ) : (
-                        <span className="text-primary-500">Jamais connecté</span>
-                      )}
+                      <div className="flex items-center space-x-1">
+                        <Calendar className="w-3 h-3" />
+                        <span>{new Date(user.created_at).toLocaleDateString('fr-FR')}</span>
+                      </div>
                     </div>
                   </td>
                   <td className="py-4 px-6">
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => {
-                          setEditingUser(user);
-                          setShowUserModal(true);
-                        }}
                         className="text-primary-600 hover:text-accent transition-colors duration-200 p-2 rounded-lg hover:bg-primary-100"
                         title="Modifier"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       
-                      {hasPermission('users:update') && user.id !== currentUser?.id && (
+                      {user.id !== currentUser?.id && (
                         <div className="relative group">
                           <button
                             className="text-primary-600 hover:text-primary-800 transition-colors duration-200 p-2 rounded-lg hover:bg-primary-100"
@@ -385,17 +348,11 @@ function UserManagement() {
                             <MoreHorizontal className="w-4 h-4" />
                           </button>
                           <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-primary-200 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
-                            <button
-                              onClick={() => handleUpdateUserStatus(user.id, user.status === 'active' ? 'inactive' : 'active')}
-                              className="w-full text-left px-4 py-2 text-sm text-primary-700 hover:bg-primary-50 transition-colors duration-200"
-                            >
-                              {user.status === 'active' ? 'Désactiver' : 'Activer'}
+                            <button className="w-full text-left px-4 py-2 text-sm text-primary-700 hover:bg-primary-50 transition-colors duration-200">
+                              Envoyer message
                             </button>
-                            <button
-                              onClick={() => handleUpdateUserStatus(user.id, 'suspended')}
-                              className="w-full text-left px-4 py-2 text-sm text-error hover:bg-error-light hover:bg-opacity-10 transition-colors duration-200"
-                            >
-                              Suspendre
+                            <button className="w-full text-left px-4 py-2 text-sm text-error hover:bg-error-light hover:bg-opacity-10 transition-colors duration-200">
+                              Désactiver
                             </button>
                           </div>
                         </div>
@@ -412,13 +369,13 @@ function UserManagement() {
           <div className="p-12 text-center">
             <Users className="w-12 h-12 text-primary-400 mx-auto mb-4" />
             <h3 className="text-primary-700 font-medium mb-2">
-              {searchTerm || roleFilter !== 'all' || statusFilter !== 'all' 
+              {searchTerm || roleFilter !== 'all' 
                 ? 'Aucun utilisateur trouvé' 
                 : 'Aucun utilisateur'
               }
             </h3>
             <p className="text-primary-600 text-sm">
-              {searchTerm || roleFilter !== 'all' || statusFilter !== 'all'
+              {searchTerm || roleFilter !== 'all'
                 ? 'Essayez de modifier vos critères de recherche'
                 : 'Commencez par inviter votre premier utilisateur'
               }
@@ -442,8 +399,8 @@ function UserManagement() {
                 <div>
                   <h4 className="text-primary-800 font-medium">{invitation.email}</h4>
                   <p className="text-primary-600 text-sm">
-                    Rôle: {invitation.role?.displayName} • 
-                    Expire le {new Date(invitation.expiresAt).toLocaleDateString('fr-FR')}
+                    Rôle: {invitation.role?.display_name} • 
+                    Expire le {new Date(invitation.expires_at).toLocaleDateString('fr-FR')}
                   </p>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -497,7 +454,7 @@ function UserManagement() {
                 >
                   <option value="">Sélectionner un rôle</option>
                   {roles.map(role => (
-                    <option key={role.id} value={role.id}>{role.displayName}</option>
+                    <option key={role.id} value={role.id}>{role.display_name}</option>
                   ))}
                 </select>
               </div>

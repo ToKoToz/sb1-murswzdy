@@ -30,6 +30,8 @@ import {
   MapPin
 } from 'lucide-react';
 
+// Reste du code sans changement...
+
 interface EmployeeFormData {
   first_name: string;
   last_name: string;
@@ -577,11 +579,6 @@ function ClientManagement() {
     return (
       <div className="min-h-screen bg-primary-50 flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
-          <img 
-            src="/Logo JLC MERCURY GRIS.png" 
-            alt="JLC Mercury Logo" 
-            className="w-16 h-16 object-contain animate-pulse"
-          />
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
         </div>
       </div>
@@ -620,11 +617,6 @@ function ClientManagement() {
           >
             <ArrowLeft className="w-6 h-6" />
           </Link>
-          <img 
-            src="/Logo JLC MERCURY GRIS.png" 
-            alt="JLC Mercury Logo" 
-            className="w-10 h-10 object-contain"
-          />
           <div>
             <h1 className="text-3xl font-bold text-primary-800 mb-2">
               Gestion des Clients

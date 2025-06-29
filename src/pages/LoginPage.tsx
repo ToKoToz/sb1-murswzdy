@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -11,7 +11,8 @@ import {
   Shield,
   Users,
   BookOpen,
-  CheckCircle
+  CheckCircle,
+  X
 } from 'lucide-react';
 
 function LoginPage() {
@@ -20,26 +21,46 @@ function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
-  const { login, error, isLoading } = useAuth();
+  const { login, error, isLoading, clearAuthError } = useAuth();
+
+  // Clear error when component mounts
+  useEffect(() => {
+    clearAuthError();
+  }, [clearAuthError]);
+
+  // Update local error state when auth error changes
+  useEffect(() => {
+    if (error) {
+      setErrorMessage(error);
+    }
+  }, [error]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!email.trim() || !password.trim()) {
+      setErrorMessage("Veuillez remplir tous les champs");
       return;
     }
 
+    setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
       const result = await login({ email: email.trim(), password, rememberMe });
       
-      if (result.success) {
-        console.log('✅ Login successful');
+      if (!result.success && result.error) {
+        // Définir un message d'erreur explicite pour les identifiants incorrects
+        setErrorMessage("Adresse mail ou mot de passe incorrect");
+        // Réinitialiser uniquement le mot de passe en cas d'erreur
+        setPassword('');
       }
     } catch (error) {
       console.error('Login error:', error);
+      setErrorMessage('Adresse mail ou mot de passe incorrect');
+      setPassword('');
     } finally {
       setIsSubmitting(false);
     }
@@ -70,12 +91,7 @@ function LoginPage() {
         <div className="hidden lg:flex lg:flex-1 bg-gradient-to-br from-accent to-accent-dark p-12 text-white">
           <div className="flex flex-col justify-center max-w-lg">
             <div className="mb-8">
-              <img 
-                src="/Logo JLC MERCURY GRIS.png" 
-                alt="JLC Mercury Logo" 
-                className="w-16 h-16 object-contain mb-6 filter brightness-0 invert"
-              />
-              <h1 className="text-4xl font-bold mb-4">Formation Pro</h1>
+              <h1 className="text-4xl font-bold mb-4">Gestion Formations</h1>
               <p className="text-xl text-accent-light">
                 Plateforme moderne de gestion des formations professionnelles
               </p>
@@ -106,7 +122,7 @@ function LoginPage() {
                 <span className="font-semibold">Plateforme sécurisée et fiable</span>
               </div>
               <p className="text-sm text-accent-light">
-                Rejoignez les entreprises qui font confiance à Formation Pro
+                Rejoignez les entreprises qui font confiance à Gestion Formations
               </p>
             </div>
           </div>
@@ -116,16 +132,11 @@ function LoginPage() {
         <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
           <div className="w-full max-w-md">
             <div className="text-center mb-8 lg:hidden">
-              <img 
-                src="/Logo JLC MERCURY GRIS.png" 
-                alt="JLC Mercury Logo" 
-                className="w-12 h-12 object-contain mx-auto mb-4"
-              />
-              <h1 className="text-2xl font-bold text-primary-800">Formation Pro</h1>
+              <h1 className="text-2xl font-bold text-primary-800">Gestion Formations</h1>
             </div>
 
             <div className="bg-white rounded-2xl shadow-2xl border border-primary-200 p-8">
-              <div className="text-center mb-8">
+              <div className="text-center mb-4">
                 <h2 className="text-3xl font-bold text-primary-800 mb-2">Connexion</h2>
                 <p className="text-primary-600">
                   Accédez à votre espace de formation
@@ -133,13 +144,19 @@ function LoginPage() {
               </div>
 
               {/* Error Display */}
-              {error && (
+              {errorMessage && (
                 <div className="mb-6 bg-error-light bg-opacity-20 border border-error rounded-xl p-4 flex items-start space-x-3">
                   <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
-                  <div>
+                  <div className="flex-1">
                     <h4 className="text-error-dark font-medium mb-1">Erreur de connexion</h4>
-                    <p className="text-error-dark text-sm">{error}</p>
+                    <p className="text-error-dark text-sm">{errorMessage}</p>
                   </div>
+                  <button
+                    onClick={() => setErrorMessage(null)}
+                    className="text-error-dark hover:text-error"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 

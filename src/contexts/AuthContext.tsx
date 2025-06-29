@@ -23,12 +23,14 @@ interface AuthContextType extends AuthState {
   login: (credentials: { email: string; password: string; rememberMe?: boolean }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   hasRole: (role: string) => boolean;
+  clearAuthError: () => void;
 }
 
 type AuthAction = 
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_USER'; payload: User | null }
   | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'CLEAR_ERROR' }
   | { type: 'LOGOUT' };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,6 +49,8 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
       };
     case 'SET_ERROR':
       return { ...state, error: action.payload, isLoading: false };
+    case 'CLEAR_ERROR':
+      return { ...state, error: null };
     case 'LOGOUT':
       return {
         user: null,
@@ -228,7 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log('🔐 Attempting login for:', credentials.email);
       dispatch({ type: 'SET_LOADING', payload: true });
-      dispatch({ type: 'SET_ERROR', payload: null });
+      dispatch({ type: 'CLEAR_ERROR' });
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: credentials.email,
@@ -274,9 +278,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return state.user?.role === role;
   };
 
+  const clearAuthError = () => {
+    dispatch({ type: 'CLEAR_ERROR' });
+  };
+
   const getAuthErrorMessage = (error: string): string => {
     const errorMap: { [key: string]: string } = {
-      'Invalid login credentials': 'Email ou mot de passe incorrect',
+      'Invalid login credentials': 'Adresse mail ou mot de passe incorrect',
       'Email not confirmed': 'Veuillez vérifier votre email',
       'User already registered': 'Un compte existe déjà avec cet email',
       'Password should be at least 6 characters': 'Le mot de passe doit contenir au moins 6 caractères',
@@ -286,7 +294,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       'Database error querying schema': 'Erreur de base de données - Veuillez réessayer'
     };
 
-    return errorMap[error] || 'Une erreur est survenue';
+    return errorMap[error] || 'Adresse mail ou mot de passe incorrect';
   };
 
   return (
@@ -294,7 +302,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...state,
       login,
       logout,
-      hasRole
+      hasRole,
+      clearAuthError
     }}>
       {children}
     </AuthContext.Provider>

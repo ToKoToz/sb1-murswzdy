@@ -3,9 +3,24 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+  console.error('❌ Missing Supabase environment variables:', {
+    url: !!supabaseUrl,
+    key: !!supabaseAnonKey
+  });
+  throw new Error('Missing Supabase environment variables. Please check your .env file.');
 }
+
+// Validate URL format
+try {
+  new URL(supabaseUrl);
+} catch {
+  console.error('❌ Invalid Supabase URL format:', supabaseUrl);
+  throw new Error('Invalid Supabase URL format. Please check VITE_SUPABASE_URL in your .env file.');
+}
+
+console.log('🔗 Initializing Supabase client with URL:', supabaseUrl);
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -20,6 +35,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
   }
 });
+
+// Test Supabase connectivity
+export const testSupabaseConnection = async (): Promise<{ success: boolean; error?: string }> => {
+  try {
+    console.log('🔍 Testing Supabase connectivity...');
+    const { error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+    
+    if (error) {
+      console.error('❌ Supabase connection test failed:', error);
+      return { success: false, error: error.message };
+    }
+    
+    console.log('✅ Supabase connection test successful');
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Supabase connection test error:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown connection error'
+    };
+  }
+};
 
 // Enhanced Training interface with all new fields
 export interface Training {
@@ -436,6 +473,7 @@ export const deleteClientLogo = async (url: string): Promise<boolean> => {
 export const createTrainer = async (trainerData: {
   name: string;
   email: string;
+  password: string; // Password est désormais obligatoire
   phone_number?: string;
   function_title?: string;
   specialties?: string[];

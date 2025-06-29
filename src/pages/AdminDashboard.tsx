@@ -82,7 +82,7 @@ function AdminDashboard() {
       const lastMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
       
       const [usersResponse, trainingsResponse, participantsResponse, invitationsResponse] = await Promise.all([
-        supabase.from('user_profiles').select('id, status, created_at'),
+        supabase.from('profiles').select('id, created_at'),
         supabase.from('trainings').select('id, status, created_at'),
         supabase.from('participants').select('id, has_signed'),
         supabase.from('user_invitations').select('id, status')
@@ -111,7 +111,7 @@ function AdminDashboard() {
 
       setStats({
         totalUsers: users.length,
-        activeUsers: users.filter(u => u.status === 'active').length,
+        activeUsers: users.length, // Since we don't have status field in profiles table
         totalTrainings: trainings.length,
         completedTrainings: trainings.filter(t => t.status === 'completed').length,
         totalParticipants: participants.length,
@@ -131,7 +131,7 @@ function AdminDashboard() {
         .from('user_activities')
         .select(`
           *,
-          user:user_profiles(first_name, last_name)
+          user:profiles(name)
         `)
         .order('created_at', { ascending: false })
         .limit(10);
@@ -140,16 +140,20 @@ function AdminDashboard() {
         const formattedActivities: RecentActivity[] = data.map(activity => ({
           id: activity.id,
           action: activity.action,
-          user: `${activity.user.first_name} ${activity.user.last_name}`,
-          resource: activity.resource,
+          user: activity.user?.name || 'Utilisateur inconnu',
+          resource: activity.resource || '',
           timestamp: activity.created_at,
           details: activity.details ? JSON.stringify(activity.details) : undefined
         }));
 
         setActivities(formattedActivities);
+      } else {
+        // If activities table doesn't exist or error occurs, set empty array
+        setActivities([]);
       }
     } catch (error) {
       console.error('Error loading activities:', error);
+      setActivities([]);
     }
   };
 
@@ -157,7 +161,7 @@ function AdminDashboard() {
     try {
       // Simple health checks
       const checks = await Promise.allSettled([
-        supabase.from('user_profiles').select('count').limit(1),
+        supabase.from('profiles').select('count').limit(1),
         supabase.storage.from('profile-pictures').list('', { limit: 1 }),
         supabase.auth.getSession()
       ]);

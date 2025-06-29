@@ -19,6 +19,7 @@ function Dashboard() {
     return <LoadingSpinner message="Chargement du tableau de bord..." />;
   }
 
+  // Filtrer pour n'inclure que les formations actives (pas les brouillons)
   const activeTrainings = trainings.filter(t => t.status === 'active');
   const totalParticipants = trainings.reduce((acc, t) => acc + (t.participants?.length || 0), 0);
   const signedParticipants = trainings.reduce((acc, t) => 
@@ -126,7 +127,11 @@ function Dashboard() {
         </div>
 
         <div className="divide-y divide-primary-200">
-          {trainings.slice(0, 5).map((training) => (
+          {/* Filtrer pour n'afficher que les formations actives ou terminées (pas de brouillons) */}
+          {trainings
+            .filter(t => t.status !== 'draft') // Exclure les brouillons
+            .slice(0, 5) // Prendre les 5 premières
+            .map((training) => (
             <Link
               key={training.id}
               to={`/trainings/${training.id}`}
@@ -172,7 +177,7 @@ function Dashboard() {
           ))}
         </div>
 
-        {trainings.length === 0 && (
+        {trainings.filter(t => t.status !== 'draft').length === 0 && (
           <div className="p-12 text-center">
             <BookOpen className="w-12 h-12 text-primary-400 mx-auto mb-4" />
             <h3 className="text-primary-700 font-medium mb-2">

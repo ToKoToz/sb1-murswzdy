@@ -1,3 +1,88 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Root styles for the document */
+html {
+  font-size: 16px;
+}
+
+/* Apply larger text if enabled */
+html.text-lg {
+  font-size: 18px;
+}
+
+/* High contrast mode */
+html.high-contrast {
+  filter: contrast(1.1);
+}
+
+html.high-contrast .text-primary-50 { @apply text-gray-50; }
+html.high-contrast .text-primary-100 { @apply text-gray-100; }
+html.high-contrast .text-primary-200 { @apply text-gray-200; }
+html.high-contrast .text-primary-300 { @apply text-gray-300; }
+html.high-contrast .text-primary-400 { @apply text-gray-400; }
+html.high-contrast .text-primary-500 { @apply text-gray-500; }
+html.high-contrast .text-primary-600 { @apply text-gray-600; }
+html.high-contrast .text-primary-700 { @apply text-gray-700; }
+html.high-contrast .text-primary-800 { @apply text-gray-800; }
+html.high-contrast .text-primary-900 { @apply text-gray-900; }
+
+html.high-contrast .bg-primary-50 { @apply bg-gray-50; }
+html.high-contrast .bg-primary-100 { @apply bg-gray-100; }
+html.high-contrast .bg-primary-200 { @apply bg-gray-200; }
+html.high-contrast .bg-primary-300 { @apply bg-gray-300; }
+html.high-contrast .bg-primary-400 { @apply bg-gray-400; }
+html.high-contrast .bg-primary-500 { @apply bg-gray-500; }
+html.high-contrast .bg-primary-600 { @apply bg-gray-600; }
+html.high-contrast .bg-primary-700 { @apply bg-gray-700; }
+html.high-contrast .bg-primary-800 { @apply bg-gray-800; }
+html.high-contrast .bg-primary-900 { @apply bg-gray-900; }
+
+html.high-contrast .bg-accent { @apply bg-blue-600; }
+html.high-contrast .bg-success { @apply bg-green-600; }
+html.high-contrast .bg-warning { @apply bg-yellow-600; }
+html.high-contrast .bg-error { @apply bg-red-600; }
+
+/* Reduce animations if enabled */
+html.reduce-motion * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* Custom date and time formats (to be used with formatDate function) */
+
+/* Form and field specific styles */
+.form-input,
+.form-select,
+.form-textarea {
+  @apply w-full py-3 px-4 bg-primary-50 border border-primary-300 rounded-lg text-primary-800 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200;
+}
+
+/* Animation classes */
+@keyframes fadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes slideIn {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes scaleIn {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.5s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s ease-out;
+}

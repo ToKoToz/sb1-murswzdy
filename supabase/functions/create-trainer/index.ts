@@ -9,6 +9,7 @@ const corsHeaders = {
 interface CreateTrainerRequest {
   name: string;
   email: string;
+  password: string;
   phone_number?: string;
   function_title?: string;
   specialties?: string[];
@@ -53,6 +54,31 @@ function validateProfilePictureUrl(url: string | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+// Function to validate password strength
+function validatePassword(password: string): { isValid: boolean; error?: string } {
+  if (password.length < 8) {
+    return { isValid: false, error: 'Le mot de passe doit contenir au moins 8 caractères' };
+  }
+  
+  if (!/(?=.*[a-z])/.test(password)) {
+    return { isValid: false, error: 'Le mot de passe doit contenir au moins une lettre minuscule' };
+  }
+  
+  if (!/(?=.*[A-Z])/.test(password)) {
+    return { isValid: false, error: 'Le mot de passe doit contenir au moins une lettre majuscule' };
+  }
+  
+  if (!/(?=.*\d)/.test(password)) {
+    return { isValid: false, error: 'Le mot de passe doit contenir au moins un chiffre' };
+  }
+  
+  if (!/(?=.*[!@#$%^&*])/.test(password)) {
+    return { isValid: false, error: 'Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*)' };
+  }
+  
+  return { isValid: true };
 }
 
 Deno.serve(async (req) => {
@@ -121,9 +147,9 @@ Deno.serve(async (req) => {
     const trainerData: CreateTrainerRequest = await req.json();
 
     // Validate required fields
-    if (!trainerData.name || !trainerData.email) {
+    if (!trainerData.name || !trainerData.email || !trainerData.password) {
       return new Response(
-        JSON.stringify({ error: 'Name and email are required' }),
+        JSON.stringify({ error: 'Name, email, and password are required' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -143,6 +169,18 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Validate password strength
+    const passwordValidation = validatePassword(trainerData.password);
+    if (!passwordValidation.isValid) {
+      return new Response(
+        JSON.stringify({ error: passwordValidation.error }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     // Validate profile picture URL if provided
     if (trainerData.profile_picture_url && !validateProfilePictureUrl(trainerData.profile_picture_url)) {
       return new Response(
@@ -154,11 +192,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if user with this email already exists
-    const { data: existingUser, error: checkUserError } = await supabaseAdmin.auth.admin.listUsers();
-    
-    if (checkUserError) {
-      console.error('Error checking existing users:', checkUserError);
+    // Check if user with this email already exists by querying the profiles table
+    const { data: existingProfile, error: checkProfileError } = await supabaseAdmin
+      .from('profiles')
+      .select('email')
+      .eq('email', trainerData.email)
+      .single();
+
+    if (checkProfileError && checkProfileError.code !== 'PGRST116') {
+      // PGRST116 is "not found" which is what we want
+      console.error('Error checking existing profiles:', checkProfileError);
       return new Response(
         JSON.stringify({ error: 'Failed to verify user uniqueness' }),
         { 
@@ -168,8 +211,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const userExists = existingUser.users.some(u => u.email === trainerData.email);
-    if (userExists) {
+    if (existingProfile) {
       return new Response(
         JSON.stringify({ error: 'A user with this email address already exists' }),
         { 
@@ -179,13 +221,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Generate a strong temporary password
-    const tempPassword = `Temp${Math.random().toString(36).slice(-8)}${Date.now().toString().slice(-4)}!`;
-
-    // Create the auth user
+    // Create the auth user with the provided password
     const { data: authData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
       email: trainerData.email,
-      password: tempPassword,
+      password: trainerData.password,
       email_confirm: true,
       user_metadata: {
         name: trainerData.name,
@@ -233,8 +272,11 @@ Deno.serve(async (req) => {
 
     console.log('User created successfully:', authData.user.id);
 
-    // Prepare profile data, ensuring arrays are properly formatted
-    const profileUpdateData = {
+    // Prepare profile data with required fields for upsert
+    const profileUpsertData = {
+      id: authData.user.id,
+      email: trainerData.email,
+      role: 'trainer',
       name: trainerData.name,
       phone_number: trainerData.phone_number || null,
       function_title: trainerData.function_title || null,
@@ -245,37 +287,38 @@ Deno.serve(async (req) => {
       profile_picture_url: trainerData.profile_picture_url || null
     };
 
-    // Update the profile with additional information
-    const { data: updatedProfile, error: profileUpdateError } = await supabaseAdmin
+    // Upsert the profile with all information (insert if not exists, update if exists)
+    const { data: upsertedProfile, error: profileUpsertError } = await supabaseAdmin
       .from('profiles')
-      .update(profileUpdateData)
-      .eq('id', authData.user.id)
+      .upsert(profileUpsertData, {
+        onConflict: 'id'
+      })
       .select()
       .single();
 
-    if (profileUpdateError) {
-      console.error('Error updating profile:', profileUpdateError);
+    if (profileUpsertError) {
+      console.error('Error upserting profile:', profileUpsertError);
       
-      // Try to clean up the created user if profile update fails
+      // Try to clean up the created user if profile upsert fails
       try {
         await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-        console.log('Cleaned up user after profile update failure');
+        console.log('Cleaned up user after profile upsert failure');
       } catch (cleanupError) {
         console.error('Failed to cleanup user:', cleanupError);
       }
       
-      let errorMessage = 'Failed to update trainer profile';
+      let errorMessage = 'Failed to create trainer profile';
       
-      if (profileUpdateError.message.includes('profile_picture_url')) {
+      if (profileUpsertError.message.includes('profile_picture_url')) {
         errorMessage = 'Invalid profile picture URL. Please use a valid image URL.';
-      } else if (profileUpdateError.message.includes('function_title')) {
+      } else if (profileUpsertError.message.includes('function_title')) {
         errorMessage = 'Invalid function title. Please select a valid option.';
       }
       
       return new Response(
         JSON.stringify({ 
           error: errorMessage,
-          details: profileUpdateError.message 
+          details: profileUpsertError.message 
         }),
         { 
           status: 400, 
@@ -284,7 +327,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log('Profile updated successfully for user:', authData.user.id);
+    console.log('Profile upserted successfully for user:', authData.user.id);
 
     return new Response(
       JSON.stringify({ 
@@ -292,10 +335,16 @@ Deno.serve(async (req) => {
         trainer: {
           id: authData.user.id,
           email: authData.user.email,
-          ...profileUpdateData,
-          temporary_password: tempPassword // Include temporary password in response for admin
+          name: trainerData.name,
+          phone_number: trainerData.phone_number || null,
+          function_title: trainerData.function_title || null,
+          specialties: Array.isArray(trainerData.specialties) ? trainerData.specialties : [],
+          experience: trainerData.experience || null,
+          degrees_certifications: Array.isArray(trainerData.degrees_certifications) ? trainerData.degrees_certifications : [],
+          availability: trainerData.availability || null,
+          profile_picture_url: trainerData.profile_picture_url || null
         },
-        message: 'Trainer created successfully. Please share the temporary password with the trainer.'
+        message: 'Formateur créé avec succès. Le formateur peut maintenant se connecter avec son email et son mot de passe.'
       }),
       { 
         status: 200, 

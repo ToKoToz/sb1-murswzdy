@@ -20,10 +20,24 @@ function DatePicker({
   max,
   className = ""
 }: DatePickerProps) {
+  // Crée une date locale à partir d'une chaîne YYYY-MM-DD sans décalage de fuseau horaire
+  const createLocalDate = (dateString: string): Date => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  // Formatage de la date en YYYY-MM-DD sans décalage de fuseau horaire
+  const formatDateToISOString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [isOpen, setIsOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(
-    value ? new Date(value) : null
+    value ? createLocalDate(value) : null
   );
   const [inputValue, setInputValue] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -31,7 +45,7 @@ function DatePicker({
 
   useEffect(() => {
     if (value) {
-      const date = new Date(value);
+      const date = createLocalDate(value);
       setSelectedDate(date);
       setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
       setInputValue(formatInputDate(date));
@@ -107,7 +121,7 @@ function DatePicker({
     const parsedDate = parseInputDate(input);
     if (parsedDate) {
       setSelectedDate(parsedDate);
-      const dateStr = parsedDate.toISOString().split('T')[0];
+      const dateStr = formatDateToISOString(parsedDate);
       onChange(dateStr);
       setCurrentMonth(new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1));
     }
@@ -122,7 +136,7 @@ function DatePicker({
       const parsedDate = parseInputDate(inputValue);
       if (parsedDate) {
         setSelectedDate(parsedDate);
-        const dateStr = parsedDate.toISOString().split('T')[0];
+        const dateStr = formatDateToISOString(parsedDate);
         onChange(dateStr);
         setInputValue(formatInputDate(parsedDate));
       } else {
@@ -165,7 +179,7 @@ function DatePicker({
   };
 
   const isDateDisabled = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateToISOString(date);
     if (min && dateStr < min) return true;
     if (max && dateStr > max) return true;
     return false;
@@ -175,7 +189,7 @@ function DatePicker({
     if (isDateDisabled(date)) return;
     
     setSelectedDate(date);
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateToISOString(date);
     onChange(dateStr);
     setInputValue(formatInputDate(date));
     setIsOpen(false);
